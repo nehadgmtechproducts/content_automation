@@ -1,0 +1,115 @@
+{
+  "name": "Content Engine — Poll & Produce",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [ { "field": "minutes", "minutesInterval": 10 } ] }
+      },
+      "id": "cron",
+      "name": "Every 10 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [ -220, 300 ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/v1/pipeline/poll",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "enqueue", "value": "true" } ] },
+        "options": { "timeout": 300000 }
+      },
+      "id": "poll",
+      "name": "Poll feeds + detect",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [ 0, 300 ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.topics_fired }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "gate",
+      "name": "Anything fired?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [ 240, 300 ]
+    },
+    {
+      "parameters": { "fieldToSplitOut": "topic_ids", "options": {} },
+      "id": "split",
+      "name": "Split topic ids",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [ 480, 200 ]
+    },
+    {
+      "parameters": {
+        "url": "=http://api:8000/v1/topics/{{ $json.topic_ids }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "detail",
+      "name": "Fetch topic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [ 720, 200 ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a", "name": "topic_id", "value": "={{ $json.id }}", "type": "number" },
+            { "id": "b", "name": "title", "value": "={{ $json.title }}", "type": "string" },
+            { "id": "c", "name": "status", "value": "={{ $json.status }}", "type": "string" },
+            { "id": "d", "name": "video_url", "value": "=http://api:8000/v1/topics/{{ $json.id }}/video", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "summary",
+      "name": "Preview card (stage 5 attaches here)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [ 960, 200 ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "n", "name": "note", "value": "=No high-velocity topic this window. Clusters seen: {{ $json.clusters }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "quiet",
+      "name": "Nothing fired",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [ 480, 420 ]
+    }
+  ],
+  "connections": {
+    "Every 10 minutes": { "main": [ [ { "node": "Poll feeds + detect", "type": "main", "index": 0 } ] ] },
+    "Poll feeds + detect": { "main": [ [ { "node": "Anything fired?", "type": "main", "index": 0 } ] ] },
+    "Anything fired?": {
+      "main": [
+        [ { "node": "Split topic ids", "type": "main", "index": 0 } ],
+        [ { "node": "Nothing fired", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Split topic ids": { "main": [ [ { "node": "Fetch topic", "type": "main", "index": 0 } ] ] },
+    "Fetch topic": { "main": [ [ { "node": "Preview card (stage 5 attaches here)", "type": "main", "index": 0 } ] ] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}

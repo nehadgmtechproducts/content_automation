@@ -1,0 +1,276 @@
+"""Stage 3 — the synthesis engine.
+
+Two calls, deliberately:
+  1. fact extraction  -> an auditable FactSheet you can inspect and re-run against
+  2. generation       -> article + 45s script + distribution metadata, from the FactSheet
+
+Splitting them means a bad article can be regenerated without re-paying for extraction,
+and the fact sheet is a reviewable artifact when someone asks "where did this claim come
+from?".
+"""
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass
+
+import anthropic
+
+from app.settings import get_settings
+from app.synth.schemas import DraftOut, FactSheetOut
+
+log = logging.getLogger(__name__)
+
+# Stable prefix -> cacheable. Nothing volatile (no timestamps, no ids) may enter these.
+FACTS_SYSTEM = """You are a wire-service fact extractor. You are given several independent \
+news articles about the same event. Your job is to separate what is established from what \
+is asserted.
+
+Rules:
+- A statement belongs in consensus_facts ONLY if at least two distinct sources assert it. \
+Record every supporting source index.
+- Anything asserted by exactly one source goes in disputed_claims, no matter how plausible.
+- Strip editorial framing. "Slammed" becomes "criticized". "Bombshell report" becomes \
+"report". Record what you stripped in editorial_framing_removed.
+- Never introduce a fact, number, name, or date that does not appear in the supplied \
+articles. If the sources do not say it, it does not exist.
+- Copy figures exactly as reported, with their units and their qualifiers ("about", \
+"more than").
+- Prefer specific attributions ("according to the filing") over vague ones ("reportedly")."""
+
+DRAFT_SYSTEM = """You are a senior technology editor writing for an audience that is \
+technically literate but time-poor. You write from a supplied fact sheet and nothing else.
+
+Hard rules:
+- Every factual claim in the article must trace to a consensus fact in the supplied sheet. \
+You may not add outside knowledge, context, or history that is not in the sheet.
+- Cite with bracketed indices [1], [2] matching the source list you are given.
+- If something is in disputed_claims, either omit it or attribute it explicitly \
+("X reported, though other outlets have not confirmed").
+- No hype. No "game-changing", "revolutionary", "in a stunning move". No rhetorical \
+questions as section headings.
+- The article body targets 600 words (+/- 60), in 3-4 H2 sections.
+
+For the video script:
+- Exactly four beats in order: hook, conflict, resolution, cta.
+- Total narration 105-125 words. That lands at ~45 seconds at natural pace. Count them.
+- The hook must state the actual news in its first 8 words. No "You won't believe".
+- The cta is one short line pointing to the full article.
+- broll_query is a literal stock-footage search phrase ("data center servers"), not a \
+description of your intent."""
+
+
+@dataclass
+class SourceDoc:
+    index: int
+    url: str
+    domain: str
+    title: str
+    markdown: str
+
+
+@dataclass
+class CallResult:
+    payload: dict
+    model: str
+    input_tokens: int
+    output_tokens: int
+
+
+class SynthesisError(RuntimeError):
+    pass
+
+
+def _client() -> anthropic.Anthropic:
+    key = get_settings().anthropic_api_key
+    if key:
+        return anthropic.Anthropic(api_key=key)
+    # No explicit key: the SDK still resolves ANTHROPIC_AUTH_TOKEN or an `ant auth login`
+    # profile, so let it try rather than failing here.
+    return anthropic.Anthropic()
+
+
+def _render_sources(docs: list[SourceDoc]) -> str:
+    parts = []
+    for d in docs:
+        parts.append(
+            f"<source index=\"{d.index}\" domain=\"{d.domain}\" url=\"{d.url}\">\n"
+            f"# {d.title}\n\n{d.markdown}\n</source>"
+        )
+    return "\n\n".join(parts)
+
+
+def extract_facts(docs: list[SourceDoc]) -> CallResult:
+    if len(docs) < 2:
+        raise SynthesisError(
+            f"need >= 2 sources to establish consensus, got {len(docs)}"
+        )
+
+    client = _client()
+    settings = get_settings()
+    response = client.messages.parse(
+        model=settings.synthesis_model,
+        max_tokens=16000,
+        thinking={"type": "adaptive"},
+        cache_control={"type": "ephemeral"},
+        system=FACTS_SYSTEM,
+        messages=[{
+            "role": "user",
+            "content": f"{_render_sources(docs)}\n\n"
+                       f"Extract the fact sheet for this event.",
+        }],
+        output_format=FactSheetOut,
+    )
+    parsed: FactSheetOut = response.parsed_output
+
+    # Enforce the >=2 sources rule in code — the prompt asks for it, this guarantees it.
+    kept = [f for f in parsed.consensus_facts if len(set(f.supporting_source_indices)) >= 2]
+    dropped = len(parsed.consensus_facts) - len(kept)
+    if dropped:
+        log.info("dropped %d single-sourced 'consensus' fact(s)", dropped)
+    parsed.consensus_facts = kept
+
+    if not kept:
+        raise SynthesisError("no fact was corroborated by two or more sources")
+
+    return CallResult(
+        payload=parsed.model_dump(),
+        model=response.model,
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+    )
+
+
+def generate_draft(fact_sheet: dict, docs: list[SourceDoc]) -> CallResult:
+    client = _client()
+    settings = get_settings()
+
+    source_list = "\n".join(f"[{d.index}] {d.title} — {d.domain} ({d.url})" for d in docs)
+    import json
+
+    response = client.messages.parse(
+        model=settings.synthesis_model,
+        max_tokens=16000,
+        thinking={"type": "adaptive"},
+        cache_control={"type": "ephemeral"},
+        system=DRAFT_SYSTEM,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"SOURCE LIST (use these indices for citations):\n{source_list}\n\n"
+                f"FACT SHEET:\n{json.dumps(fact_sheet, indent=2)}\n\n"
+                f"Write the article, the 45-second vertical video script, and the "
+                f"distribution metadata."
+            ),
+        }],
+        output_format=DraftOut,
+    )
+    parsed: DraftOut = response.parsed_output
+    return CallResult(
+        payload=parsed.model_dump(),
+        model=response.model,
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+    )
+
+
+# ------------------------------------------------------------------- validation
+
+_NUMBER = re.compile(
+    r"(?<![\w.])\$?\s?(\d[\d,]*(?:\.\d+)?)\s*"
+    r"(trillion|billion|million|thousand|percent|tn|bn|mn|m|k|%)?\b",
+    re.IGNORECASE,
+)
+_MAGNITUDES = {
+    "trillion": 10 ** 12, "tn": 10 ** 12,
+    "billion": 10 ** 9, "bn": 10 ** 9,
+    "million": 10 ** 6, "mn": 10 ** 6, "m": 10 ** 6,
+    "thousand": 10 ** 3, "k": 10 ** 3,
+}
+_YEAR = re.compile(r"^(1[89]|20)\d{2}$")
+# Bare integers this small are list counts, ordinals and durations ("top 3", "2 days"),
+# not the kind of figure worth auditing. Decimals are always audited.
+_SMALL_COUNT_MAX = 12
+
+
+def _numbers_in(text: str) -> set[str]:
+    """Every auditable figure in `text`, normalized so formatting differences match.
+
+    "$4.2 billion", "4.2bn" and "$4,200,000,000" all yield the same tokens, so the
+    validator compares meaning rather than punctuation.
+    """
+    found: set[str] = set()
+    for raw, unit in _NUMBER.findall(text):
+        token = raw.replace(",", "").rstrip(".")
+        if not token:
+            continue
+        if _YEAR.match(token):
+            continue
+        try:
+            value = float(token)
+        except ValueError:
+            continue
+        # Bare small integers carry no audit risk; a decimal or a unit means it does.
+        if "." not in token and not unit and value <= _SMALL_COUNT_MAX:
+            continue
+
+        found.add(token)
+        multiplier = _MAGNITUDES.get(unit.lower()) if unit else None
+        if multiplier:
+            scaled = value * multiplier
+            found.add(str(int(scaled)) if scaled.is_integer() else str(scaled))
+    return found
+
+
+def validate_grounding(draft: dict, fact_sheet: dict) -> list[str]:
+    """Return a list of ungrounded figures found in the draft.
+
+    This guards the one failure mode that actually matters in automated news: a
+    confidently invented number. Everything the article states numerically must appear
+    somewhere in the fact sheet.
+    """
+    article = draft.get("article", {})
+    body = " ".join(
+        [article.get("dek", ""), article.get("why_it_matters", "")]
+        + [s.get("body_markdown", "") for s in article.get("sections", [])]
+        + list(article.get("key_takeaways", []))
+    )
+    script_text = " ".join(b.get("narration", "") for b in draft.get("script", {}).get("beats", []))
+
+    sheet_text = " ".join(
+        [fact_sheet.get("headline_summary", "")]
+        + [f.get("statement", "") for f in fact_sheet.get("consensus_facts", [])]
+        + [f"{n.get('value','')} {n.get('describes','')}" for n in fact_sheet.get("numbers", [])]
+        + [t.get("what", "") + " " + t.get("when", "") for t in fact_sheet.get("timeline", [])]
+        + [d.get("statement", "") for d in fact_sheet.get("disputed_claims", [])]
+    )
+
+    grounded = _numbers_in(sheet_text)
+    problems = []
+    for number in sorted(_numbers_in(body) | _numbers_in(script_text)):
+        if number not in grounded:
+            problems.append(number)
+    return problems
+
+
+def synthesize(docs: list[SourceDoc]) -> tuple[CallResult, CallResult, str]:
+    """Full stage 3. Returns (facts, draft, validation_notes).
+
+    One retry on ungrounded figures — a second failure is reported rather than hidden,
+    because silently shipping an invented number is worse than a failed topic.
+    """
+    facts = extract_facts(docs)
+    draft = generate_draft(facts.payload, docs)
+
+    problems = validate_grounding(draft.payload, facts.payload)
+    notes = ""
+    if problems:
+        log.warning("ungrounded figures %s — regenerating once", problems)
+        draft = generate_draft(facts.payload, docs)
+        problems = validate_grounding(draft.payload, facts.payload)
+        if problems:
+            notes = f"UNGROUNDED FIGURES AFTER RETRY: {', '.join(problems)}"
+            log.error(notes)
+        else:
+            notes = "regenerated once to clear ungrounded figures"
+    return facts, draft, notes

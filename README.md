@@ -1,0 +1,235 @@
+# Automated Content Engine
+
+Watches tech/AI news, detects when a story is genuinely breaking across multiple
+outlets, and produces a publishable package: a ~600-word cited article, a 45-second
+vertical video script, a hero image, a voiceover, and a rendered 1080×1920 MP4 with
+word-synced kinetic subtitles.
+
+**This is milestone 1 — stages 1–4.** Stage 5 (Telegram approval) and stage 6
+(Ghost / X / YouTube / Reels / TikTok publishing) are not built; their interfaces are
+laid down in `app/publishers/base.py` so they attach without touching anything upstream.
+
+---
+
+## Quick start
+
+```bash
+python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m spacy download en_core_web_sm
+cp .env.example .env          # add ANTHROPIC_API_KEY and FIRECRAWL_API_KEY
+```
+
+Smoke-test the asset pipeline with no database, no API keys and no network:
+
+```bash
+.venv/bin/python -m app.cli run-all --fixture
+```
+
+Full stack:
+
+```bash
+docker compose up -d postgres redis
+.venv/bin/alembic upgrade head
+docker compose up -d api worker beat n8n
+```
+
+n8n is at http://localhost:5678 — import `n8n/content-engine-workflow.json`.
+The API is at http://localhost:8000/docs.
+
+---
+
+## The one thing that matters most
+
+The naive spec rule — "3+ sources on the same entity in 30 minutes" — fires constantly
+in this vertical. "OpenAI" clears three sources on a dead news day. So the trigger in
+`app/detect/velocity.py` is a **spike against each entity's own rolling baseline**, and
+all four conditions must hold:
+
+1. ≥ 3 *distinct domains* — not distinct items, because wire copy republished five times
+   is one source;
+2. ≥ 1 tier-1 original-reporting source;
+3. domain count ≥ `baseline_mean + 2σ` (EWMA per entity), once ≥ 8 observations exist;
+4. the story hasn't already fired in the last 24 h.
+
+Clustering is semantic (`all-MiniLM-L6-v2`), not entity-only — otherwise every unrelated
+OpenAI story of the day merges into one meaningless blob.
+
+**Tune before you trust it:**
+
+```bash
+.venv/bin/python -m app.cli detect --dry-run     # what would fire right now, and why
+.venv/bin/python -m app.cli backfill --days 3    # replay history; see the fire rate
+```
+
+Thresholds live in `config/detect.yaml`.
+
+---
+
+## Pipeline
+
+| Stage | Module | What it does |
+|---|---|---|
+| 1 Signal detection | `app/ingest/` | Polls RSS, Google News, HN, Reddit every 10 min |
+| 2 Velocity trigger | `app/detect/` | NER → semantic clustering → spike scoring |
+| 2b Scraping | `app/scrape/` | Firecrawl → trafilatura fallback, clean Markdown |
+| 3 Synthesis | `app/synth/` | Claude: fact sheet, then article + script + metadata |
+| 4 Asset production | `app/assets/` | Hero image, voiceover, alignment, ASS subs, MP4 |
+
+`Topic.status` drives everything: `detected → scraped → synthesized → assets_ready`.
+
+### Google News attribution
+
+Google News republishes other outlets. If those links stayed on `news.google.com`, three
+separate outlets covering one story would collapse into a single domain and the trigger
+would never fire. `app/ingest/normalize.py` resolves each item back to its true
+publisher via the feed's `<source>` element, a decodable legacy article id, or the
+`" - Publisher"` title suffix — in that order.
+
+### Synthesis is two calls, not one
+
+`extract_facts()` produces an auditable fact sheet where **a claim is only "consensus" if
+≥ 2 sources assert it** (enforced in code, not just in the prompt). `generate_draft()`
+writes from that sheet alone. Then `validate_grounding()` rejects the draft if it
+contains any figure absent from the sheet, and regenerates once. That guards the one
+failure mode that actually matters in automated news: a confidently invented number.
+
+Model: `claude-opus-5`, ~$0.10 per topic. At 10 topics/day that's ~$30/month — the LLM
+is the cheapest part of this system.
+
+---
+
+## Providers: free by default, paid when you want
+
+Every external capability is an adapter with a **free local default**, chosen in
+`config/providers.yaml`. Change a value, restart — no code change.
+
+| Capability | Default (no key) | Paid upgrade |
+|---|---|---|
+| Hero image | `pillow_card` — typeset editorial card | `replicate_flux` |
+| Voiceover | `piper` (binary) → macOS `say` | `elevenlabs` |
+
+| Word timestamps | `faster-whisper` small/int8 → proportional estimate | — |
+| B-roll | Pexels (free key) → hero card + Ken Burns | — |
+| Scraping | `firecrawl` → `trafilatura` | — |
+
+A paid adapter selected without its key logs a warning and degrades to the free one
+rather than crashing.
+
+**Voiceover length is measured, not assumed.** A 45-second script is only 45 seconds if
+the voice cooperates, and rates differ per provider. `_synthesize_to_target()` measures
+the result and re-synthesizes once at a corrected pace if it misses by more than 12%.
+Without it the fixture script came out at 34.9s against a 45s target.
+
+Piper is installed as a **standalone binary**, not via pip: `piper-tts` depends on
+`piper-phonemize`, which publishes no macOS arm64 wheel, so `pip install piper-tts`
+cannot work on this machine at all.
+
+---
+
+## Verified state
+
+Everything below was run end-to-end on this machine.
+
+| Stage | Status | Evidence |
+|---|---|---|
+| 1 Ingest | working | 13/15 sources OK, 427 items collected live |
+| 2 Detect | working | 338 clusters from 427 items, **1** fired — a real multi-outlet story |
+| 2b Scrape | working via trafilatura | 2 articles pulled; Firecrawl path needs your key |
+| 3 Synthesis | **untested** | needs `ANTHROPIC_API_KEY` |
+| 4 Assets | working | 41.8s 1080×1920 MP4, word-synced captions, verified frame-by-frame |
+| Tests | 58 passing | `pytest tests -q`, all offline |
+
+The one live fire was *"Seattle Times and Newsday sue OpenAI and Microsoft"* across
+techcrunch.com, theverge.com and winbuzzer.com — while 337 other clusters were correctly
+held back. That is the quality bar the trigger was built for.
+
+### Known source issues
+
+- **Reddit** rate-limits unauthenticated RSS hard. With a 7s per-host delay, 2 of 4
+  subreddits succeed per poll from a consumer IP; expect better from a VPS on a 10-minute
+  cadence. Reddit is tier-3 and can never fire a topic alone, so partial coverage is not
+  a correctness problem.
+- **VentureBeat** returns 429 to this bot UA from this IP. Left in the config because it
+  may behave differently from your server; the source-health table makes it visible.
+- **ZDNet** was removed — its RSS 404s on every documented URL.
+
+## Rendering requires a containerized FFmpeg
+
+**Your Homebrew FFmpeg cannot burn subtitles.** It's built without libass/freetype —
+`ass`, `subtitles` and `drawtext` are all missing:
+
+```bash
+ffmpeg -hide_banner -filters | grep -w ass    # no output on the host
+docker compose run --rm render ffmpeg -hide_banner -filters | grep -w ass   # present
+```
+
+`app/assets/render.py::check_ffmpeg()` fails loudly rather than shipping a
+subtitle-less video, and both Dockerfiles assert the filter exists at build time.
+
+So that the acceptance test runs on this machine, set `RENDER_IN_DOCKER=1` and build the
+small helper image once — the renderer then delegates to it automatically, mounting the
+media tree at the same absolute path so the generated command runs unchanged:
+
+```bash
+docker build -t content-engine-ffmpeg -f docker/ffmpeg.Dockerfile .
+echo "RENDER_IN_DOCKER=1" >> .env
+python -m app.cli run-all --fixture
+```
+
+Two details that were only findable by looking at rendered pixels:
+
+- **Captions must not blink.** Chunk timings straight from Whisper leave a gap in every
+  inter-phrase pause — 11 gaps totalling ~5s in a 42s video, which reads as broken
+  rendering. Each chunk now holds until the next begins (`MAX_HOLD_SECONDS`), while a
+  genuine silence still clears the screen.
+- **`WrapStyle` must be 0.** With `WrapStyle: 2` libass does no automatic wrapping, so a
+  caption wider than the frame runs off both edges instead of breaking onto a second line.
+
+Composition: hard cuts between beats (not xfade — it needs exact offset arithmetic
+across a variable input count and breaks noisily on short beats; hard cuts are also the
+right editorial choice at this length). Beat visuals are timed from the **aligned word
+timestamps**, so the picture cuts on the narration rather than on a script estimate.
+Ken Burns via `zoompan` on stills, `loudnorm` to −14 LUFS, x264 CRF 20, `+faststart`.
+
+---
+
+## Host constraints this repo is built around
+
+- **8 GB RAM** → Whisper pinned to `small`/int8, worker concurrency 1, n8n capped at 512 MB.
+- **41 GB free disk (91% full)** → `MEDIA_RETENTION_DAYS` (default 14) with a nightly
+  prune task. Not optional. Run `python -m app.cli prune` any time.
+- **arm64** → every compose service pins `platform: linux/arm64`; an amd64 image would
+  run under QEMU and make renders ~5× slower with no warning.
+- **Python 3.11**, not 3.14 — spaCy, faster-whisper and sentence-transformers wheels lag
+  the newest interpreter on arm64.
+
+---
+
+## Commands
+
+```bash
+python -m app.cli ingest                 # stage 1, with per-source health
+python -m app.cli detect --dry-run       # stage 2, explains every decision
+python -m app.cli backfill --days 3      # replay history to tune thresholds
+python -m app.cli scrape  --topic <id>   # stage 2b
+python -m app.cli synth   --topic <id>   # stage 3 (needs ANTHROPIC_API_KEY)
+python -m app.cli assets  --topic <id>   # stage 4
+python -m app.cli produce --topic <id>   # stages 2b→4
+python -m app.cli run-all --fixture      # offline end-to-end smoke test
+python -m app.cli topics                 # pipeline state
+python -m app.cli check-render           # can this ffmpeg burn subtitles?
+python -m app.cli prune                  # enforce media retention
+pytest tests -q                          # offline unit tests
+```
+
+---
+
+## Before stage 6
+
+Start these now — they're the long pole and nothing in this milestone unblocks them:
+
+- **TikTok** Content Posting API requires an *audited* app. Until audited, uploads land
+  as private drafts only.
+- **Instagram Reels** requires a Business account plus Meta app review.
+- **YouTube** Data API v3 default quota allows roughly 6 uploads/day.
+- **X** free tier caps posting hard; Basic is ~$200/month.

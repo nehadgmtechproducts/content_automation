@@ -1,0 +1,43 @@
+# Which adapter backs each capability. Every capability has a free local default
+# so the pipeline runs end-to-end with no paid keys except Firecrawl.
+# Change a value here and restart — no code change required.
+
+image:
+  active: pillow_card          # pillow_card | replicate_flux
+  pillow_card: {}
+  replicate_flux:
+    model: "black-forest-labs/flux-schnell"
+    aspect_ratio: "9:16"
+
+tts:
+  active: piper                # piper | elevenlabs
+  piper:
+    voice: en_US-lessac-medium
+    length_scale: 1.0
+  elevenlabs:
+    voice_id: "21m00Tcm4TlvDq8ikWAM"
+    model_id: "eleven_turbo_v2_5"
+
+# Word-level timestamps always come from local Whisper regardless of TTS provider,
+# so subtitle timing is identical whichever voice you use.
+alignment:
+  model_size: small            # tiny | base | small  (small ~= 450MB, CPU int8)
+  compute_type: int8
+
+subtitles:
+  # Must exist inside the render container (docker/render.Dockerfile installs
+  # fonts-dejavu-core). Changing this without adding the font there means fontconfig
+  # silently substitutes something else at burn time.
+  font_family: DejaVu Sans
+  font_size: 92
+  margin_v: 430          # keeps captions above Reels/Shorts/TikTok bottom UI
+
+broll:
+  active: pexels               # pexels | stills_only
+  pexels:
+    orientation: portrait
+    per_beat: 1
+
+scrape:
+  active: firecrawl            # firecrawl | trafilatura
+  fallback: trafilatura

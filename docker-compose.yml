@@ -1,0 +1,111 @@
+# arm64 is pinned throughout: on Apple Silicon an amd64 image would run under QEMU and
+# make renders roughly 5x slower with no warning.
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+psycopg://engine:engine@postgres:5432/content_engine
+  REDIS_URL: redis://redis:6379/0
+  MEDIA_ROOT: /srv/media
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+  PEXELS_API_KEY: ${PEXELS_API_KEY:-}
+  ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+  REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+  SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-claude-opus-5}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    platform: linux/arm64
+    environment:
+      POSTGRES_USER: engine
+      POSTGRES_PASSWORD: engine
+      POSTGRES_DB: content_engine
+    ports: ["5432:5432"]
+    volumes: ["./pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engine -d content_engine"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources: { limits: { memory: 512M } }
+
+  redis:
+    image: redis:7-alpine
+    platform: linux/arm64
+    ports: ["6379:6379"]
+    command: ["redis-server", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: { context: ., dockerfile: docker/app.Dockerfile }
+    platform: linux/arm64
+    environment: *app-env
+    ports: ["8000:8000"]
+    volumes: ["./media:/srv/media", "./models:/models"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # Single worker image with ffmpeg, so any task can render. On 8GB RAM concurrency
+  # stays at 1: a render plus a Whisper model is already most of the free memory.
+  worker:
+    build: { context: ., dockerfile: docker/render.Dockerfile }
+    platform: linux/arm64
+    environment: *app-env
+    volumes: ["./media:/srv/media", "./models:/models"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      resources: { limits: { memory: 3G } }
+
+  beat:
+    build: { context: ., dockerfile: docker/app.Dockerfile }
+    platform: linux/arm64
+    environment: *app-env
+    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
+    depends_on:
+      redis: { condition: service_healthy }
+
+  # One-off render shell:  docker compose run --rm render ffmpeg -filters | grep ass
+  render:
+    build: { context: ., dockerfile: docker/render.Dockerfile }
+    platform: linux/arm64
+    environment: *app-env
+    volumes: ["./media:/srv/media", "./models:/models"]
+    profiles: ["tools"]
+    entrypoint: []
+    command: ["bash"]
+
+  # Stage 5: listens for Approve/Discard button presses. Long-polls Telegram, so it's
+  # idle almost all the time — no ffmpeg needed, uses the lightweight app image.
+  approvals:
+    build: { context: ., dockerfile: docker/app.Dockerfile }
+    platform: linux/arm64
+    environment: *app-env
+    command: ["python", "-m", "app.cli", "approvals-poll"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    platform: linux/arm64
+    ports: ["5678:5678"]
+    environment:
+      N8N_SECURE_COOKIE: "false"
+      GENERIC_TIMEZONE: UTC
+      NODE_OPTIONS: "--max-old-space-size=512"
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+      - ./n8n:/workflows:ro
+    depends_on: [api]
+    deploy:
+      resources: { limits: { memory: 768M } }

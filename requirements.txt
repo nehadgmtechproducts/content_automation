@@ -1,0 +1,45 @@
+# --- core service ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+sqlalchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+celery[redis]==5.4.0
+redis==5.2.1
+typer==0.15.1
+# Pinned explicitly: typer 0.15.1's --help rendering calls click's old
+# Parameter.make_metavar(self) signature. click>=8.2 requires make_metavar(self, ctx)
+# and --help crashes with TypeError. celery/typer would otherwise pull in the newer
+# click transitively with no pin of their own.
+click==8.1.8
+rich==13.9.4
+PyYAML==6.0.2
+tenacity==9.0.0
+
+# --- stage 1: ingest ---
+httpx==0.28.1
+feedparser==6.0.11
+
+# --- stage 2: detect ---
+spacy==3.8.3
+sentence-transformers==3.3.1
+numpy==2.2.1
+rapidfuzz==3.11.0
+
+# --- stage 2b: scrape (Firecrawl via REST, no SDK) ---
+trafilatura==2.0.0
+
+# --- stage 3: synthesis ---
+anthropic==0.42.0
+
+# --- stage 4: assets ---
+Pillow==11.1.0
+# Piper TTS is installed as a standalone binary in docker/render.Dockerfile —
+# its pip package needs piper-phonemize, which has no macOS arm64 wheel.
+faster-whisper==1.1.1
+
+# --- dev ---
+pytest==8.3.4
+pytest-asyncio==0.25.1

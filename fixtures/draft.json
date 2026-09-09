@@ -1,0 +1,77 @@
+{
+  "entity": "Nvidia",
+  "article": {
+    "title": "Nvidia Opens Its Networking Stack to Rival Accelerators",
+    "slug": "nvidia-opens-networking-stack-rival-accelerators",
+    "meta_description": "Nvidia will license its NVLink interconnect to third-party chip designers, a shift that could reshape how AI data centres are assembled.",
+    "dek": "The interconnect has been the quiet source of Nvidia's lock-in. Licensing it changes the calculus for every rival accelerator.",
+    "sections": [
+      {
+        "heading": "What was announced",
+        "body_markdown": "Nvidia said it will license NVLink, its high-bandwidth chip-to-chip interconnect, to outside silicon designers under a new programme [1]. Partners will be able to attach their own accelerators and CPUs directly to Nvidia's rack-scale systems rather than communicating over slower standard fabrics [2].\n\nThe company framed the move as a response to customer demand for mixed-fleet data centres [1][3]."
+      },
+      {
+        "heading": "Why the interconnect matters",
+        "body_markdown": "Raw accelerator throughput has not been the binding constraint in large training runs for some time. Moving activations and gradients between chips is [2].\n\n- NVLink offers substantially more bandwidth than the PCIe links most third-party accelerators rely on [2]\n- Rack-scale systems built around it are sold as a single unit, making partial substitution difficult [1]\n- Competing open efforts have struggled to match its deployed scale [3]"
+      },
+      {
+        "heading": "What remains unclear",
+        "body_markdown": "Neither licensing terms nor pricing were disclosed [1][2]. Nvidia also did not say whether licensees get the full specification or a constrained profile of it [3].\n\nOne outlet reported that early partners have already signed, though this has not been confirmed elsewhere and Nvidia declined to name them."
+      }
+    ],
+    "key_takeaways": [
+      "Nvidia will license NVLink to third-party chip designers",
+      "The interconnect, not raw compute, is the practical bottleneck in large training runs",
+      "Terms, pricing and the scope of the licensed specification were not disclosed",
+      "Rival accelerators could attach to Nvidia rack systems rather than replacing them"
+    ],
+    "why_it_matters": "Nvidia's advantage has never rested on the GPU alone; it rests on the system the GPU sits in. Licensing the interconnect trades some of that lock-in for a larger share of the rack, and it suggests Nvidia would rather host its competitors than watch an open alternative consolidate around them.",
+    "word_count": 612
+  },
+  "script": {
+    "beats": [
+      {
+        "beat": "hook",
+        "narration": "Nvidia just opened its networking stack to rival chipmakers. That is a bigger deal than it sounds.",
+        "on_screen_text": "Nvidia opens NVLink",
+        "broll_query": "data center servers",
+        "target_seconds": 6.5
+      },
+      {
+        "beat": "conflict",
+        "narration": "For years the real lock-in was never the GPU. It was NVLink, the interconnect moving data between chips. Competitors could match raw compute, but they were stuck talking over far slower standard links.",
+        "on_screen_text": "The real lock-in",
+        "broll_query": "fiber optic network",
+        "target_seconds": 13.0
+      },
+      {
+        "beat": "resolution",
+        "narration": "Now Nvidia will license it. Rival accelerators can plug straight into Nvidia racks instead of replacing them. Terms and pricing were not disclosed, and it is unclear whether licensees get the full specification.",
+        "on_screen_text": "Rivals can plug in",
+        "broll_query": "computer chip closeup",
+        "target_seconds": 14.0
+      },
+      {
+        "beat": "cta",
+        "narration": "We broke down what it means for the accelerator market. Full analysis at the link.",
+        "on_screen_text": "Full analysis",
+        "broll_query": "person using laptop",
+        "target_seconds": 6.0
+      }
+    ],
+    "total_words": 113,
+    "estimated_seconds": 45.0
+  },
+  "metadata": {
+    "title_variants": [
+      "Nvidia Opens Its Networking Stack to Rival Accelerators",
+      "Nvidia Will License NVLink. Here's Why That Matters",
+      "The Real Nvidia Moat Was Never the GPU"
+    ],
+    "target_keywords": ["nvidia nvlink licensing", "ai interconnect", "ai data center", "gpu alternatives"],
+    "hashtags": ["#Nvidia", "#AI", "#semiconductors", "#datacenter", "#techNews"],
+    "thumbnail_text": "Nvidia opens NVLink",
+    "music_mood": "tense minimal electronic",
+    "category": "Semiconductors"
+  }
+}

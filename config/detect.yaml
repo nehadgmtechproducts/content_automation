@@ -1,0 +1,24 @@
+# Velocity trigger thresholds. These WILL need tuning against real traffic —
+# use `python -m app.cli backfill --days 3` to see what would have fired before
+# committing to numbers.
+
+window_minutes: 30
+poll_interval_minutes: 10
+
+clustering:
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  cosine_threshold: 0.78
+  min_title_chars: 20
+
+trigger:
+  min_distinct_domains: 3      # distinct DOMAINS, not distinct items
+  require_tier1: true          # >=1 original-reporting source
+  baseline_sigma: 2.0          # fire at >= max(min_distinct_domains, baseline + Nσ)
+  suppression_hours: 24        # don't re-fire the same story
+
+baseline:
+  ewma_alpha: 0.15             # per-entity mentions-per-window baseline
+  min_observations: 8          # below this, fall back to the flat threshold
+
+scrape:
+  top_n_articles: 3
