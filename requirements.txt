@@ -36,10 +36,13 @@ anthropic==0.42.0
 
 # --- stage 4: assets ---
 Pillow==11.1.0
-# Piper TTS is installed as a standalone binary in docker/render.Dockerfile —
-# its pip package needs piper-phonemize, which has no macOS arm64 wheel.
+# Piper TTS (free, local). piper-tts 1.8+ ships its own phonemizer with wheels for macOS
+# arm64 and Linux aarch64 — the older 1.2 needed piper-phonemize, which had no Mac wheel.
+# Voices are downloaded separately:  python -m piper.download_voices en_US-ryan-high --download-dir models/piper
+piper-tts==1.8.0
 faster-whisper==1.1.1
 
 # --- dev ---
 pytest==8.3.4
 pytest-asyncio==0.25.1
+openai==3.14.1

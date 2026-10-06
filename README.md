@@ -93,8 +93,11 @@ writes from that sheet alone. Then `validate_grounding()` rejects the draft if i
 contains any figure absent from the sheet, and regenerates once. That guards the one
 failure mode that actually matters in automated news: a confidently invented number.
 
-Model: `claude-opus-5`, ~$0.10 per topic. At 10 topics/day that's ~$30/month — the LLM
-is the cheapest part of this system.
+Provider is chosen by `SYNTHESIS_PROVIDER` — `fal` (default; one `FAL_KEY` also powers
+video, model `FAL_LLM_MODEL`, default `openai/gpt-6.1-sol`), `anthropic`, or `openai`.
+All three share the same prompts, schemas and grounding validator, so switching never
+changes what "grounded" means. **fal's scripting path is not yet verified live** — its
+account balance was exhausted, so no real completion has run (see "Verified state").
 
 ---
 
@@ -106,10 +109,10 @@ Every external capability is an adapter with a **free local default**, chosen in
 | Capability | Default (no key) | Paid upgrade |
 |---|---|---|
 | Hero image | `pillow_card` — typeset editorial card | `replicate_flux` |
-| Voiceover | `piper` (binary) → macOS `say` | `elevenlabs` |
+| Voiceover | `piper` (pip package, voice `en_US-ryan-high`) → macOS `say` | `elevenlabs` |
 
 | Word timestamps | `faster-whisper` small/int8 → proportional estimate | — |
-| B-roll | Pexels (free key) → hero card + Ken Burns | — |
+| B-roll | `fal` — footage generated per beat by Gemini Omni Flash 1.1 (~$0.03/output second, ~$0.75–1.35 per video) → `pexels` (free) → hero card + Ken Burns | — |
 | Scraping | `firecrawl` → `trafilatura` | — |
 
 A paid adapter selected without its key logs a warning and degrades to the free one
@@ -120,9 +123,9 @@ the voice cooperates, and rates differ per provider. `_synthesize_to_target()` m
 the result and re-synthesizes once at a corrected pace if it misses by more than 12%.
 Without it the fixture script came out at 34.9s against a 45s target.
 
-Piper is installed as a **standalone binary**, not via pip: `piper-tts` depends on
-`piper-phonemize`, which publishes no macOS arm64 wheel, so `pip install piper-tts`
-cannot work on this machine at all.
+Piper installs from pip (`piper-tts==1.8.0`, wheels for macOS arm64 and Linux aarch64).
+Download a voice once: `python -m piper.download_voices en_US-ryan-high --download-dir models/piper`.
+(The old 1.2 package needed `piper-phonemize`, which had no Mac wheel — that no longer applies.)
 
 ---
 
@@ -152,6 +155,15 @@ held back. That is the quality bar the trigger was built for.
 - **VentureBeat** returns 429 to this bot UA from this IP. Left in the config because it
   may behave differently from your server; the source-health table makes it visible.
 - **ZDNet** was removed — its RSS 404s on every documented URL.
+
+### fal.ai (scripting + video) — needs a funded balance
+
+One `FAL_KEY` covers Stage 3 and Stage 4. The key authenticates, but fal refuses every
+run with `403 User is locked. Reason: Exhausted balance` until credit is added at
+**fal.ai/dashboard/billing**. Until then neither scripting nor generated B-roll can run
+(B-roll fails soft to the hero card; scripting fails with a message naming the fix).
+Unit tests cover request shapes against fake transports — they are not proof fal behaves
+that way live. Generated clips cap at 10 s, so a longer beat holds its last frame.
 
 ## Rendering requires a containerized FFmpeg
 
@@ -217,10 +229,16 @@ python -m app.cli assets  --topic <id>   # stage 4
 python -m app.cli produce --topic <id>   # stages 2b→4
 python -m app.cli run-all --fixture      # offline end-to-end smoke test
 python -m app.cli topics                 # pipeline state
+python -m app.cli export-web --topic <id> # approved topic -> news site (needs WEB_PROJECT_DIR)
 python -m app.cli check-render           # can this ffmpeg burn subtitles?
 python -m app.cli prune                  # enforce media retention
 pytest tests -q                          # offline unit tests
 ```
+
+**Freshness is judged by publish time.** Detection ignores any item whose outlet-published
+time (falling back to fetch time only when a feed gives none) is older than
+`freshness.max_age_hours`, so a 3-day-old story fetched today can't fire as "breaking".
+`export-web` only exports `approved`/`published` topics (override: `--allow-unapproved`).
 
 ---
 

@@ -12,7 +12,7 @@ image:
 tts:
   active: piper                # piper | elevenlabs
   piper:
-    voice: en_US-lessac-medium
+    voice: en_US-ryan-high      # also downloaded: en_US-lessac-medium
     length_scale: 1.0
   elevenlabs:
     voice_id: "21m00Tcm4TlvDq8ikWAM"
@@ -33,7 +33,15 @@ subtitles:
   margin_v: 430          # keeps captions above Reels/Shorts/TikTok bottom UI
 
 broll:
-  active: pexels               # pexels | stills_only
+  active: fal                  # fal | pexels | stills_only
+  # fal: footage GENERATED per beat by Gemini Omni Flash 1.1 — $0.03 per output second
+  # (~$0.75-1.35 per video). Needs FAL_KEY and a funded fal balance.
+  fal:
+    endpoint: google/gemini-omni-flash/v1.1/text-to-video
+    resolution: 720p           # 360p | 720p | 1080p | 4k  (higher may cost more — unverified)
+    poll_seconds: 5
+    max_wait_seconds: 300
+  # pexels: free stock footage (needs a free PEXELS_API_KEY)
   pexels:
     orientation: portrait
     per_beat: 1

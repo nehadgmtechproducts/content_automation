@@ -116,19 +116,26 @@ def beat_spans(words: list[Word], beat_word_counts: list[int]) -> list[tuple[flo
     return spans
 
 
-def plan_segments(hero: Path, beat_clips: list[Path | None],
+def plan_segments(hero: Path, beat_clips: list,
                   spans: list[tuple[float, float]], total_duration: float,
                   hero_seconds: float = HERO_SECONDS) -> list[Segment]:
-    """Build the visual timeline. Guarantees the segments sum to the audio duration."""
+    """Build the visual timeline. Guarantees the segments sum to the audio duration.
+
+    Each entry of `beat_clips` is one clip (or None) or a LIST of clips for that beat; a
+    beat with several clips splits its time evenly between them.
+    """
     segments: list[Segment] = [Segment(hero, False, hero_seconds)]
 
-    for clip, (start, end) in zip(beat_clips, spans):
+    for clips, (start, end) in zip(beat_clips, spans):
         visual_start = max(start, hero_seconds)
         duration = end - visual_start
         if duration < MIN_SEGMENT:
             continue
-        source = clip if clip is not None else hero
-        segments.append(Segment(source, source.suffix.lower() == ".mp4", float(duration)))
+        pieces = clips if isinstance(clips, list) and clips else [clips]
+        each = float(duration) / len(pieces)
+        for clip in pieces:
+            source = clip if clip is not None else hero
+            segments.append(Segment(source, source.suffix.lower() == ".mp4", each))
 
     if len(segments) == 1:
         segments.append(Segment(hero, False, max(total_duration - hero_seconds, MIN_SEGMENT)))
@@ -143,7 +150,12 @@ def _video_filter(idx: int, seg: Segment) -> str:
     frames = max(int(round(seg.duration * FPS)), 1)
     if seg.is_video:
         return (
-            f"[{idx}:v]trim=start=0:duration={seg.duration:.3f},setpts=PTS-STARTPTS,"
+            # tpad first: a source shorter than its beat (generated clips cap at 10s, a beat
+            # can run ~15s) would otherwise yield a SHORT segment and shove every later
+            # caption out of sync with the voice. Cloning the last frame fills the gap.
+            f"[{idx}:v]setpts=PTS-STARTPTS,"
+            f"tpad=stop_mode=clone:stop_duration={seg.duration:.3f},"
+            f"trim=start=0:duration={seg.duration:.3f},setpts=PTS-STARTPTS,"
             f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={WIDTH}:{HEIGHT},fps={FPS},setsar=1,format=yuv420p[v{idx}]"
         )

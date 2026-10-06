@@ -146,6 +146,33 @@ def produce(topic: int = typer.Option(..., "--topic")) -> None:
     console.print_json(data=pipeline.produce(topic))
 
 
+@app.command("export-web")
+def export_web(
+    topic: int = typer.Option(..., "--topic"),
+    web_dir: str = typer.Option("", "--web-dir", help="Path to news_automation_web (default: WEB_PROJECT_DIR)"),
+    allow_unapproved: bool = typer.Option(False, "--allow-unapproved",
+                                          help="Sample/demo export of a topic not yet approved"),
+) -> None:
+    """Stage 6 (web) — write an approved topic into the news site's content folder."""
+    from pathlib import Path
+
+    from app.publishers.web import ExportError, export_topic
+    from app.settings import get_settings
+
+    settings = get_settings()
+    target = web_dir or settings.web_project_dir
+    if not target:
+        console.print("[red]Set WEB_PROJECT_DIR in .env or pass --web-dir[/red]")
+        raise typer.Exit(2)
+    try:
+        result = export_topic(topic, Path(target).expanduser(), settings.media_path,
+                              allow_unapproved=allow_unapproved)
+    except ExportError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    console.print_json(data=result)
+
+
 @app.command()
 def topics(limit: int = 20) -> None:
     """List recent topics and their pipeline status."""

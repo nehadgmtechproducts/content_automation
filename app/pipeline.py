@@ -12,14 +12,15 @@ from sqlalchemy import select
 from app.assets.pipeline import produce_assets
 from app.db import session_scope
 from app.detect.velocity import run_detection, top_articles_for_topic
+from app.freshness import check_freshness
 from app.ingest.fetch import ingest_once
 from app.models import (
     AssetBundle, Draft, FactSheet, ScrapedArticle, Topic, TopicStatus,
 )
 from app.approval import service as approval_service
 from app.scrape.client import scrape
-from app.settings import detect_config
-from app.synth.engine import SourceDoc, SynthesisError, synthesize
+from app.settings import detect_config, get_settings
+from app.synth.engine import SourceDoc, SynthesisError
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +52,15 @@ def run_poll() -> dict:
 
 def run_scrape(topic_id: int) -> dict:
     """Stage 2b: pull full text for the topic's top source articles."""
+    with session_scope() as s:
+        topic = s.get(Topic, topic_id)
+        if topic is None:
+            return {"topic_id": topic_id, "scraped": 0, "error": "topic not found"}
+        check = check_freshness(topic.created_at, detect_config()["freshness"]["max_age_hours"])
+    if not check.fresh:
+        _fail(topic_id, check.reason)
+        return {"topic_id": topic_id, "scraped": 0, "error": check.reason}
+
     limit = detect_config()["scrape"]["top_n_articles"]
     items = top_articles_for_topic(topic_id, limit)
     if not items:
@@ -92,6 +102,15 @@ def run_scrape(topic_id: int) -> dict:
 def run_synthesis(topic_id: int) -> dict:
     """Stage 3: fact sheet, then article + script + metadata."""
     with session_scope() as s:
+        topic = s.get(Topic, topic_id)
+        if topic is None:
+            return {"topic_id": topic_id, "ok": False, "error": "topic not found"}
+        check = check_freshness(topic.created_at, detect_config()["freshness"]["max_age_hours"])
+    if not check.fresh:
+        _fail(topic_id, check.reason)
+        return {"topic_id": topic_id, "ok": False, "error": check.reason}
+
+    with session_scope() as s:
         articles = list(s.scalars(
             select(ScrapedArticle).where(ScrapedArticle.topic_id == topic_id)
             .order_by(ScrapedArticle.source_index)
@@ -105,6 +124,14 @@ def run_synthesis(topic_id: int) -> dict:
     if len(docs) < 2:
         _fail(topic_id, f"need >= 2 scraped sources, have {len(docs)}")
         return {"topic_id": topic_id, "ok": False}
+
+    provider = get_settings().synthesis_provider
+    if provider == "openai":
+        from app.synth.engine_openai import synthesize
+    elif provider == "fal":
+        from app.synth.engine_fal import synthesize
+    else:
+        from app.synth.engine import synthesize
 
     try:
         facts, draft, notes = synthesize(docs)
@@ -148,6 +175,10 @@ def run_assets(topic_id: int) -> dict:
         if draft is None or topic is None:
             _fail(topic_id, "no draft to produce assets from")
             return {"topic_id": topic_id, "ok": False}
+        check = check_freshness(topic.created_at, detect_config()["freshness"]["max_age_hours"])
+    if not check.fresh:
+        _fail(topic_id, check.reason)
+        return {"topic_id": topic_id, "ok": False, "error": check.reason}
         article, script, meta = dict(draft.article), dict(draft.script), dict(draft.meta)
         entity = topic.primary_entity
 

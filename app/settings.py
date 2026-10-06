@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     # --- credentials ---
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    # fal.ai — one key for both Stage 3 scripting (OpenAI-compatible LLM router) and
+    # Stage 4 video (Gemini Omni). Read from the FAL_KEY env var.
+    fal_key: str = ""
     firecrawl_api_key: str = ""
     pexels_api_key: str = ""
     elevenlabs_api_key: str = ""
@@ -31,11 +35,21 @@ class Settings(BaseSettings):
     media_retention_days: int = 14
 
     # --- models ---
+    # Which provider Stage 3 actually calls. "anthropic" needs anthropic_api_key +
+    # synthesis_model; "openai" needs openai_api_key + openai_model. Switching is a
+    # config change only — app/pipeline.py branches on this, nothing else does.
+    # "anthropic" | "openai" | "fal" — app/pipeline.py branches on this.
+    synthesis_provider: str = "fal"
     synthesis_model: str = "claude-opus-5"
+    openai_model: str = "gpt-4o"
+    fal_llm_model: str = "openai/gpt-6.1-sol"
 
     # --- stage 5: Telegram approval (optional — blank means "not configured") ---
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+
+    # --- stage 6: web export (path to the news_automation_web checkout) ---
+    web_project_dir: str = ""
 
     # --- behaviour ---
     fixture_mode: bool = False

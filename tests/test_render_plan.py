@@ -71,3 +71,18 @@ def test_music_track_is_mixed_and_ducked():
     filtergraph = cmd[cmd.index("-filter_complex") + 1]
     assert "amix=inputs=2" in filtergraph
     assert "volume=0.10" in filtergraph
+
+
+def test_a_long_beat_with_several_clips_splits_its_time_between_them():
+    """fal clips cap at 10s; a 17s beat gets two clips instead of one frozen frame."""
+    a, b, c = Path("/tmp/a.mp4"), Path("/tmp/b.mp4"), Path("/tmp/c.mp4")
+    ws = words(40)
+    duration = ws[-1].end
+    spans = beat_spans(ws, [10, 10, 10, 10])
+    segments = plan_segments(HERO, [[a], [b, c], [None], [None]], spans, duration)
+    paths = [s.path for s in segments]
+    assert paths.count(b) == 1 and paths.count(c) == 1
+    sb = next(s for s in segments if s.path == b)
+    sc = next(s for s in segments if s.path == c)
+    assert abs(sb.duration - sc.duration) < 1e-6          # even split
+    assert abs(sum(s.duration for s in segments) - duration) < 1e-6   # still equals the audio

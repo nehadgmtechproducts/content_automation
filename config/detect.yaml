@@ -22,3 +22,10 @@ baseline:
 
 scrape:
   top_n_articles: 3
+
+freshness:
+  # Refuse to scrape/synthesize/render a topic older than this. Under normal
+  # automatic operation (Celery chains stages within seconds of a fire) this should
+  # essentially never trigger — it exists for "left sitting for days" scenarios:
+  # no API key configured yet, a paused worker, a manual CLI run on old data.
+  max_age_hours: 24

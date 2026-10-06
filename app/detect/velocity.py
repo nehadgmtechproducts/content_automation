@@ -22,6 +22,7 @@ from sqlalchemy import select
 from app.db import session_scope
 from app.detect.cluster import Candidate, Cluster, cluster_candidates, default_embedder
 from app.detect.entities import extract_entities
+from app.freshness import check_freshness, event_time, split_fresh
 from app.ingest.normalize import is_article_url
 from app.models import (
     Cluster as ClusterRow, ClusterItem, EntityBaseline, FiredSuppression, RawItem,
@@ -145,6 +146,21 @@ def run_detection(dry_run: bool = False, window_minutes: int | None = None,
         if not items:
             return reports
 
+        # The window above is an INGEST window (what we fetched recently). Whether a
+        # story is *breaking* depends on when it was PUBLISHED, so drop anything older
+        # than the freshness limit before clustering. Stale items are still marked
+        # processed below so they don't pile up.
+        max_age = cfg["freshness"]["max_age_hours"]
+        all_items = items
+        items, stale_items = split_fresh(all_items, max_age)
+        if stale_items:
+            log.info("detection: ignored %d item(s) published more than %sh ago",
+                     len(stale_items), max_age)
+        if not items:
+            for item in all_items:
+                item.processed = True
+            return reports
+
         candidates = []
         for item in items:
             entities = item.entities or extract_entities(f"{item.title}. {item.summary}")
@@ -162,6 +178,7 @@ def run_detection(dry_run: bool = False, window_minutes: int | None = None,
         )
 
         now = datetime.now(timezone.utc)
+        items_by_id = {i.id: i for i in items}
         for cluster in clusters:
             entity = cluster.primary_entity()
             if not entity:
@@ -182,6 +199,9 @@ def run_detection(dry_run: bool = False, window_minutes: int | None = None,
                 "fired": decision.fired,
                 "reason": decision.reason,
                 "domains": sorted({m.domain for m in cluster.members}),
+                "newest_source_age_hours": round(min(
+                    check_freshness(event_time(items_by_id[m.item_id]), max_age, now).age_hours
+                    for m in cluster.members), 1),
                 "topic_id": None,
             }
 
@@ -229,7 +249,7 @@ def run_detection(dry_run: bool = False, window_minutes: int | None = None,
 
             reports.append(report)
 
-        for item in items:
+        for item in all_items:
             item.processed = True
 
     return reports

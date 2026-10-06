@@ -56,8 +56,11 @@ For the video script:
 - Total narration 105-125 words. That lands at ~45 seconds at natural pace. Count them.
 - The hook must state the actual news in its first 8 words. No "You won't believe".
 - The cta is one short line pointing to the full article.
-- broll_query is a literal stock-footage search phrase ("data center servers"), not a \
-description of your intent."""
+- broll_query describes ONE concrete, filmable shot in 6-12 words that shows the story's \
+actual subject — name the product, company or object ("Apple MacBook showing a privacy \
+permission dialog", not "person typing on a laptop"). A shot that could illustrate any tech \
+story is not acceptable. Each beat's shot must look different from the others. Do not ask \
+for readable text, and do not name any brand other than the story's own subject."""
 
 
 @dataclass

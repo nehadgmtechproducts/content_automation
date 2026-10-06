@@ -27,6 +27,8 @@ VOICE_REPO = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 VOICE_PATHS = {
     "en_US-lessac-medium": "en/en_US/lessac/medium/en_US-lessac-medium.onnx",
     "en_US-amy-medium": "en/en_US/amy/medium/en_US-amy-medium.onnx",
+    "en_US-ryan-high": "en/en_US/ryan/high/en_US-ryan-high.onnx",
+    "en_US-lessac-high": "en/en_US/lessac/high/en_US-lessac-high.onnx",
     "en_GB-alba-medium": "en/en_GB/alba/medium/en_GB-alba-medium.onnx",
 }
 MODEL_DIR = ROOT / "models" / "piper"
@@ -106,11 +108,19 @@ class PiperTTS(TTSProvider):
         try:
             voice = PiperVoice.load(str(model))
             with wave.open(str(req.out_path), "wb") as wav:
-                # The API gained synthesize_wav in later releases; support both.
-                if hasattr(voice, "synthesize_wav"):
-                    voice.synthesize_wav(req.text, wav)
-                else:
-                    voice.synthesize(req.text, wav)
+                try:
+                    from piper import SynthesisConfig
+
+                    # length_scale stretches time, so a faster target means a smaller value.
+                    # Without this the pipeline's measure-and-correct pacing pass (which
+                    # re-synthesizes at a corrected speed_scale) silently does nothing.
+                    cfg = SynthesisConfig(length_scale=self.length_scale / max(req.speed_scale, 0.1))
+                    voice.synthesize_wav(req.text, wav, syn_config=cfg)
+                except ImportError:       # older piper-tts without SynthesisConfig
+                    if hasattr(voice, "synthesize_wav"):
+                        voice.synthesize_wav(req.text, wav)
+                    else:
+                        voice.synthesize(req.text, wav)
             return req.out_path.exists() and req.out_path.stat().st_size > 1024
         except Exception as exc:  # noqa: BLE001 - any failure means fall back
             log.warning("piper package synthesis failed: %s", exc)

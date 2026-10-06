@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,8 @@ def _word_count(text: str) -> int:
 
 
 DEFAULT_TARGET_SECONDS = 45.0
+# Camera variety for the 2nd, 3rd... clip of a long beat, so it doesn't repeat one shot.
+ANGLE_VARIANTS = ("close-up detail shot", "wide establishing shot", "slow tracking shot")
 # Beyond this relative error, re-synthesize once at a corrected pace.
 DURATION_TOLERANCE = 0.12
 
@@ -115,19 +118,28 @@ def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
     # --- b-roll, one clip per beat ---
     beats = script.get("beats", [])
     spans = beat_spans(words, [_word_count(b.get("narration", "")) for b in beats])
-    clips: list[Path | None] = []
+    clips: list[list[Path | None]] = []
+    clip_no = 0
     for i, (beat, (start, end)) in enumerate(zip(beats, spans)):
-        clip = None
-        if providers.broll is not None:
+        beat_clips: list[Path | None] = []
+        span = max(end - start, 1.0)
+        if providers.broll is None:
+            beat_clips.append(None)
+        else:
             query = beat.get("broll_query") or entity or headline
-            fetched = providers.broll.fetch(
-                BrollRequest(query=query, seconds=max(end - start, 1.0), index=i), out_dir
-            )
-            if fetched:
-                clip = fetched.path
-            else:
-                log.info("no b-roll for beat %d (%r); using hero card", i, query)
-        clips.append(clip)
+            cap = providers.broll.max_clip_seconds
+            n = max(1, math.ceil(span / cap)) if cap else 1
+            for j in range(n):
+                q = query if j == 0 else f"{query}, {ANGLE_VARIANTS[(j - 1) % len(ANGLE_VARIANTS)]}"
+                fetched = providers.broll.fetch(
+                    BrollRequest(query=q, seconds=span / n, index=clip_no, context=headline), out_dir)
+                clip_no += 1
+                if fetched:
+                    beat_clips.append(fetched.path)
+                else:
+                    log.info("no b-roll for beat %d clip %d (%r); using hero card", i, j, q)
+                    beat_clips.append(None)
+        clips.append(beat_clips)
 
     # --- render ---
     segments = plan_segments(hero_vertical, clips, spans, duration)

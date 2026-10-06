@@ -41,6 +41,7 @@ class BrollRequest:
     query: str
     seconds: float
     index: int
+    context: str = ""        # the story headline, so footage can show the actual subject
 
 
 @dataclass
@@ -67,6 +68,10 @@ class TTSProvider(ABC):
 
 class BrollProvider(ABC):
     name: str = "broll"
+    # Longest single clip this provider can return. A beat longer than this gets several
+    # clips instead of one clip frozen on its last frame. None = no cap (stock footage is
+    # picked to be at least as long as the beat).
+    max_clip_seconds: float | None = None
 
     @abstractmethod
     def fetch(self, req: BrollRequest, out_dir: Path) -> BrollClip | None: ...
@@ -125,12 +130,21 @@ def load_providers() -> ProviderSet:
 
     # --- b-roll ---
     broll: BrollProvider | None = None
-    if cfg["broll"].get("active") == "pexels" and settings.pexels_api_key:
+    broll_choice = cfg["broll"].get("active")
+    if broll_choice == "fal" and settings.fal_key:
+        from app.providers.broll_fal import FalBroll
+
+        broll = FalBroll(cfg["broll"].get("fal", {}))
+        used["broll"] = broll.name
+    elif broll_choice == "pexels" and settings.pexels_api_key:
         from app.providers.broll_pexels import PexelsBroll
 
         broll = PexelsBroll(cfg["broll"]["pexels"])
         used["broll"] = broll.name
     else:
+        if broll_choice in ("fal", "pexels"):
+            log.warning("%s selected for B-roll but its key is unset — using stills_only",
+                        broll_choice)
         used["broll"] = "stills_only"
 
     return ProviderSet(image=image, tts=tts, broll=broll, used=used)
