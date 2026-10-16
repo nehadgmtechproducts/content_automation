@@ -18,6 +18,7 @@ import anthropic
 
 from app.settings import get_settings
 from app.synth.schemas import DraftOut, FactSheetOut
+from app.categories import prompt_listing
 
 log = logging.getLogger(__name__)
 
@@ -38,8 +39,26 @@ articles. If the sources do not say it, it does not exist.
 "more than").
 - Prefer specific attributions ("according to the filing") over vague ones ("reportedly")."""
 
-DRAFT_SYSTEM = """You are a senior technology editor writing for an audience that is \
-technically literate but time-poor. You write from a supplied fact sheet and nothing else.
+DRAFT_SYSTEM = """You are a senior news editor writing for a general audience that is \
+intelligent but time-poor. You write from a supplied fact sheet and nothing else.
+
+Choose exactly ONE category for the story:
+""" + prompt_listing() + """
+
+Category rules (apply the rules of the category you chose, in addition to the hard rules):
+- Politics: attribute every claim to a named person, body or outlet. State what happened \
+and what each side says only when the sources do. No predictions, no speculation about \
+motives, no loaded labels, no endorsement of any party or candidate. For war, violence \
+or protests: no graphic detail; casualty or damage figures must carry the source that \
+reported them.
+- Finance: report prices, percentages and figures exactly as sourced, with the date or \
+session they refer to. Never recommend buying, selling or holding anything, and never \
+forecast prices. Do not imply a stock will rise or fall.
+- Entertainment (including sports): scores, results, dates, names and titles exactly as \
+sourced. Anything a single outlet reports as a rumour or leak goes in disputed_claims.
+- Launches: specifications, prices and availability are the manufacturer's claims — \
+attribute them ("the company says") and keep the currency and region as sourced.
+- Technology: performance and benchmark claims belong to the company that made them.
 
 Hard rules:
 - Every factual claim in the article must trace to a consensus fact in the supplied sheet. \
@@ -58,9 +77,13 @@ For the video script:
 - The cta is one short line pointing to the full article.
 - broll_query describes ONE concrete, filmable shot in 6-12 words that shows the story's \
 actual subject — name the product, company or object ("Apple MacBook showing a privacy \
-permission dialog", not "person typing on a laptop"). A shot that could illustrate any tech \
-story is not acceptable. Each beat's shot must look different from the others. Do not ask \
-for readable text, and do not name any brand other than the story's own subject."""
+permission dialog", not "person typing on a laptop"). A shot that could illustrate any story \
+in the category is not acceptable. Each beat's shot must look different from the others. \
+Do not ask for readable text, and do not name any brand other than the story's own subject.
+- Politics stories: the shot must NOT show real or identifiable people, soldiers, police, \
+crowds, weapons, flags, injuries or any depiction of a real event — generated footage of \
+those can be mistaken for real footage. Use symbolic objects instead (a gavel, a ballot \
+box, a sealed envelope, scales, a map on a table)."""
 
 
 @dataclass
@@ -82,6 +105,12 @@ class CallResult:
 
 class SynthesisError(RuntimeError):
     pass
+
+
+class BillingError(SynthesisError):
+    """The provider account has no balance. Not about the story: every topic fails the same
+    way until someone tops up, so the scheduler pauses production instead of burning
+    stories (see app/production.py)."""
 
 
 def _client() -> anthropic.Anthropic:

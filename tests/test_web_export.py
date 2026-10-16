@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
-from app.publishers.web import MediaFacts, build_web_article, split_category, trim_description
+import pytest
+
+from app.publishers.web import ExportError, MediaFacts, MediaPaths, build_web_article, split_category, trim_description
 
 ARTICLE = {
     "slug": "apple-full-disk-access", "title": "Apple Tightens Disk Access", "dek": "A dek.",
@@ -14,29 +16,38 @@ SOURCES = [
      "published_at": datetime(2026, 10, 2, tzinfo=timezone.utc)},
     {"index": 2, "title": "B", "domain": "b.com", "url": "https://b.com/y", "published_at": None},
 ]
-MEDIA = MediaFacts(1200, 675, 1080, 1920, 42.766)
+MEDIA = MediaFacts(cover_width=1600, cover_height=900, social_width=1200, social_height=675,
+                   video_width=1080, video_height=1920, video_seconds=42.766)
+PATHS = MediaPaths(cover="/media/apple-full-disk-access/cover-aaaaaaaa.jpg",
+                   social="/media/apple-full-disk-access/social-bbbbbbbb.jpg",
+                   poster="/media/apple-full-disk-access/poster-cccccccc.jpg",
+                   video="/media/apple-full-disk-access/video-dddddddd.mp4")
 WHEN = datetime(2026, 10, 5, 12, 12, 52, tzinfo=timezone.utc)
 
 
 def build(**over):
     kw = dict(topic_id=6, entity="Apple", article=ARTICLE, meta=META, sources=SOURCES,
-              published_at=WHEN, media=MEDIA)
+              published_at=WHEN, media=MEDIA, paths=PATHS)
     kw.update(over)
     return build_web_article(**kw)
 
 
 def test_category_is_split_into_one_category_plus_keyword():
     assert split_category("Technology / Privacy") == ("Technology", ["Privacy"])
-    assert split_category("") == ("Technology", [])
+    with pytest.raises(ExportError):          # no silent default: an empty label blocks export
+        split_category("")
     doc = build()
     assert doc["category"] == "Technology"
     assert doc["keywords"] == ["Apple", "macOS", "Privacy"]
 
 
-def test_media_paths_and_dimensions_use_slug_and_probed_values():
+def test_cover_is_the_hero_and_the_titled_card_is_the_social_image():
     doc = build()
-    assert doc["heroImage"]["src"] == "/media/apple-full-disk-access/hero.jpg"
-    assert doc["video"]["poster"] == "/media/apple-full-disk-access/poster.jpg"
+    assert doc["heroImage"]["src"] == PATHS.cover
+    assert (doc["heroImage"]["width"], doc["heroImage"]["height"]) == (1600, 900)
+    assert doc["socialImage"]["src"] == PATHS.social
+    assert (doc["socialImage"]["width"], doc["socialImage"]["height"]) == (1200, 675)
+    assert doc["video"]["poster"] == PATHS.poster and doc["video"]["src"] == PATHS.video
     assert doc["video"]["durationSeconds"] == 42.77
     assert (doc["video"]["width"], doc["video"]["height"]) == (1080, 1920)
 
@@ -72,3 +83,23 @@ def test_short_first_sentence_prefers_the_fuller_word_boundary_cut():
 def test_long_description_without_sentence_break_cuts_on_a_word():
     out = trim_description("word " * 80)
     assert len(out) <= 161 and out.endswith("…") and "wor…" not in out
+
+
+# --- category taxonomy -----------------------------------------------------------
+import pytest
+
+from app.publishers.web import ExportError
+
+
+def test_legacy_labels_normalize_to_the_taxonomy_in_the_export():
+    doc = build(meta={**META, "category": "Artificial Intelligence"})
+    assert doc["category"] == "Technology"
+
+
+def test_new_categories_export_as_themselves():
+    assert build(meta={**META, "category": "Launches"})["category"] == "Launches"
+
+
+def test_unknown_category_blocks_the_export_instead_of_inventing_a_heading():
+    with pytest.raises(ExportError, match="taxonomy"):
+        build(meta={**META, "category": "Knitting"})

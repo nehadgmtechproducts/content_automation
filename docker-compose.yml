@@ -1,23 +1,49 @@
-# arm64 is pinned throughout: on Apple Silicon an amd64 image would run under QEMU and
-# make renders roughly 5x slower with no warning.
+# Platform: defaults to arm64 (Apple Silicon — an amd64 image there would run under QEMU and
+# render ~5x slower). On a normal Linux server set DOCKER_PLATFORM=linux/amd64 in .env,
+# otherwise the reverse happens: arm64 images get emulated on an amd64 host.
+#
+# Default stack (`docker compose up -d`): postgres, redis, worker, beat, approvals.
+#   beat      - schedules poll_and_detect every 10 minutes (config/detect.yaml)
+#   worker    - runs scrape -> write -> render for each fired story
+#   approvals - listens for Approve/Discard in Telegram and publishes approved stories
+# `api` and `n8n` are optional extras:  docker compose --profile extras up -d
+# One image (docker/render.Dockerfile: ffmpeg + libass + piper) serves every Python service.
 
 x-app-env: &app-env
   DATABASE_URL: postgresql+psycopg://engine:engine@postgres:5432/content_engine
   REDIS_URL: redis://redis:6379/0
   MEDIA_ROOT: /srv/media
+  HF_HOME: /srv/models/hf               # whisper + embedding models, persisted in ./models
+  WEB_PROJECT_DIR: /srv/web             # where approved stories are published (see volumes)
+  SYNTHESIS_PROVIDER: ${SYNTHESIS_PROVIDER:-fal}
+  FAL_KEY: ${FAL_KEY:-}
+  FAL_LLM_MODEL: ${FAL_LLM_MODEL:-openai/gpt-6.1-sol}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
   PEXELS_API_KEY: ${PEXELS_API_KEY:-}
   ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
   REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
-  SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-claude-opus-5}
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
   TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+  MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-14}
+
+x-app: &app
+  build: { context: ., dockerfile: docker/render.Dockerfile }
+  image: content-engine-app
+  platform: ${DOCKER_PLATFORM:-linux/arm64}
+  environment: *app-env
+  restart: unless-stopped
+
+x-app-volumes: &app-volumes
+  - ./media:/srv/media
+  - ./models:/srv/models              # piper voices live at /srv/models/piper
 
 services:
   postgres:
     image: postgres:16-alpine
-    platform: linux/arm64
+    platform: ${DOCKER_PLATFORM:-linux/arm64}
+    restart: unless-stopped
     environment:
       POSTGRES_USER: engine
       POSTGRES_PASSWORD: engine
@@ -34,7 +60,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    platform: linux/arm64
+    platform: ${DOCKER_PLATFORM:-linux/arm64}
+    restart: unless-stopped
     ports: ["6379:6379"]
     command: ["redis-server", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
     healthcheck:
@@ -44,22 +71,19 @@ services:
       retries: 10
 
   api:
-    build: { context: ., dockerfile: docker/app.Dockerfile }
-    platform: linux/arm64
-    environment: *app-env
+    <<: *app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports: ["8000:8000"]
-    volumes: ["./media:/srv/media", "./models:/models"]
+    volumes: *app-volumes
+    profiles: ["extras"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
-  # Single worker image with ffmpeg, so any task can render. On 8GB RAM concurrency
-  # stays at 1: a render plus a Whisper model is already most of the free memory.
+  # Concurrency stays at 1: a render plus a Whisper model is most of the free memory.
   worker:
-    build: { context: ., dockerfile: docker/render.Dockerfile }
-    platform: linux/arm64
-    environment: *app-env
-    volumes: ["./media:/srv/media", "./models:/models"]
+    <<: *app
+    volumes: *app-volumes
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -67,37 +91,37 @@ services:
       resources: { limits: { memory: 3G } }
 
   beat:
-    build: { context: ., dockerfile: docker/app.Dockerfile }
-    platform: linux/arm64
-    environment: *app-env
-    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info"]
+    <<: *app
+    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info",
+              "--schedule=/tmp/celerybeat-schedule"]
     depends_on:
       redis: { condition: service_healthy }
 
   # One-off render shell:  docker compose run --rm render ffmpeg -filters | grep ass
   render:
-    build: { context: ., dockerfile: docker/render.Dockerfile }
-    platform: linux/arm64
-    environment: *app-env
-    volumes: ["./media:/srv/media", "./models:/models"]
+    <<: *app
+    volumes: *app-volumes
     profiles: ["tools"]
+    restart: "no"
     entrypoint: []
     command: ["bash"]
 
-  # Stage 5: listens for Approve/Discard button presses. Long-polls Telegram, so it's
-  # idle almost all the time — no ffmpeg needed, uses the lightweight app image.
+  # Stage 5/6: listens for Approve/Discard button presses (long-polls Telegram, idle almost
+  # all the time) and, on Approve, publishes the story into the website project. That is why
+  # it mounts the web folder: publishing = writing the article JSON + media there.
+  # ONLY ONE poller may run per bot token — stop any `approvals-poll` started by hand first.
   approvals:
-    build: { context: ., dockerfile: docker/app.Dockerfile }
-    platform: linux/arm64
-    environment: *app-env
+    <<: *app
     command: ["python", "-m", "app.cli", "approvals-poll"]
+    volumes:
+      - ./media:/srv/media
+      - ${WEB_PROJECT_HOST_DIR:-../news_automation_web}:/srv/web
     depends_on:
       postgres: { condition: service_healthy }
-    restart: unless-stopped
 
   n8n:
     image: n8nio/n8n:latest
-    platform: linux/arm64
+    platform: ${DOCKER_PLATFORM:-linux/arm64}
     ports: ["5678:5678"]
     environment:
       N8N_SECURE_COOKIE: "false"
@@ -107,5 +131,6 @@ services:
       - ./n8n_data:/home/node/.n8n
       - ./n8n:/workflows:ro
     depends_on: [api]
+    profiles: ["extras"]
     deploy:
       resources: { limits: { memory: 768M } }

@@ -17,7 +17,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.db import session_scope
 from app.detect.cluster import Candidate, Cluster, cluster_candidates, default_embedder
@@ -125,6 +125,17 @@ def _is_suppressed(session, fingerprint: str, hours: int) -> bool:
     ) is not None
 
 
+def remaining_topic_budget(session, max_per_day: int | None, now: datetime) -> int | None:
+    """How many more topics may be created in the rolling 24h; None = unlimited."""
+    if not max_per_day:
+        return None
+    created = session.scalar(
+        select(func.count()).select_from(Topic).where(
+            Topic.created_at >= now - timedelta(hours=24),
+            Topic.status != TopicStatus.failed))   # a failed topic produced nothing: no budget used
+    return max(0, max_per_day - int(created or 0))
+
+
 def run_detection(dry_run: bool = False, window_minutes: int | None = None,
                   embedder=None) -> list[dict]:
     """Cluster the current window, score it, and create Topics for anything that fires.
@@ -179,6 +190,8 @@ def run_detection(dry_run: bool = False, window_minutes: int | None = None,
 
         now = datetime.now(timezone.utc)
         items_by_id = {i.id: i for i in items}
+        remaining = remaining_topic_budget(
+            s, cfg["trigger"].get("max_topics_per_day"), now)
         for cluster in clusters:
             entity = cluster.primary_entity()
             if not entity:
@@ -187,6 +200,14 @@ def run_detection(dry_run: bool = False, window_minutes: int | None = None,
             stats, row = _load_stats(s, entity)
             suppressed = _is_suppressed(s, fingerprint, cfg["trigger"]["suppression_hours"])
             decision = evaluate(cluster, stats, cfg, suppressed)
+            if decision.fired and remaining is not None and remaining <= 0:
+                decision = Decision(
+                    False,
+                    f"daily cap of {cfg['trigger']['max_topics_per_day']} topics reached "
+                    f"(would otherwise fire: {decision.reason})",
+                    decision.threshold, decision.distinct_domains, decision.baseline)
+            if decision.fired and remaining is not None:
+                remaining -= 1      # counted in dry-run too, so --dry-run matches production
 
             report = {
                 "entity": entity,

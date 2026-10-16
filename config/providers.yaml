@@ -33,7 +33,11 @@ subtitles:
   margin_v: 430          # keeps captions above Reels/Shorts/TikTok bottom UI
 
 broll:
-  active: fal                  # fal | pexels | stills_only
+  active: text_cards           # text_cards | fal | pexels | stills_only
+  # text_cards: free typographic video — each beat's on-screen line as a full-screen card.
+  # No footage is generated, so it costs nothing and cannot invent a scene. Switch back to
+  # `fal` once the fal balance is topped up.
+  text_cards: {}
   # fal: footage GENERATED per beat by Gemini Omni Flash 1.1 — $0.03 per output second
   # (~$0.75-1.35 per video). Needs FAL_KEY and a funded fal balance.
   fal:

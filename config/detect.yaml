@@ -15,6 +15,10 @@ trigger:
   require_tier1: true          # >=1 original-reporting source
   baseline_sigma: 2.0          # fire at >= max(min_distinct_domains, baseline + Nσ)
   suppression_hours: 24        # don't re-fire the same story
+  # Cost guard. Every fired topic is auto-produced (LLM + ~45s of generated footage at
+  # roughly $1.50). With five categories feeding the trigger, a busy news day could fire
+  # dozens, so cap how many topics may be created per rolling 24h. Raise it deliberately.
+  max_topics_per_day: 8
 
 baseline:
   ewma_alpha: 0.15             # per-entity mentions-per-window baseline

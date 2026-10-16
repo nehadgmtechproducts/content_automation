@@ -72,3 +72,41 @@ def test_ewma_converges_and_tracks_variance():
 def test_first_observation_seeds_the_mean():
     stats = update_ewma(BaselineStats(), 4.0, 0.15)
     assert stats.mean == 4.0 and stats.observations == 1
+
+
+# --- daily topic cap ---------------------------------------------------------------
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
+from app.detect.velocity import remaining_topic_budget
+from app.models import Base, Topic
+
+
+def _session():
+    eng = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(eng)
+    return Session(eng)
+
+
+def test_budget_counts_only_the_last_24_hours():
+    now = datetime(2026, 10, 6, 12, tzinfo=timezone.utc)
+    with _session() as s:
+        s.add(Topic(title="a", primary_entity="x", created_at=now - timedelta(hours=1)))
+        s.add(Topic(title="b", primary_entity="x", created_at=now - timedelta(hours=23)))
+        s.add(Topic(title="old", primary_entity="x", created_at=now - timedelta(hours=30)))
+        s.flush()
+        assert remaining_topic_budget(s, 5, now) == 3
+
+
+def test_budget_never_goes_negative_and_none_means_unlimited():
+    now = datetime(2026, 10, 6, 12, tzinfo=timezone.utc)
+    with _session() as s:
+        for i in range(4):
+            s.add(Topic(title=str(i), primary_entity="x", created_at=now))
+        s.flush()
+        assert remaining_topic_budget(s, 2, now) == 0
+        assert remaining_topic_budget(s, None, now) is None
+        assert remaining_topic_budget(s, 0, now) is None

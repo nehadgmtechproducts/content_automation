@@ -19,6 +19,10 @@ def _setup_logging(verbose: bool) -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    # httpx/httpcore log full request URLs, and Telegram's Bot API puts the bot token in the
+    # URL path (/bot<TOKEN>/getUpdates). Never emit that, even with --verbose.
+    for noisy in ("httpx", "httpx2", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 @app.callback()
@@ -247,6 +251,22 @@ def notify(topic: int = typer.Option(..., "--topic")) -> None:
     console.print_json(data=result)
     if not result.get("sent"):
         raise typer.Exit(1)
+
+
+@app.command("production")
+def production_cmd(action: str = typer.Argument("status", help="status | pause | resume")) -> None:
+    """Show / set the automatic-production circuit breaker (see app/production.py)."""
+    from app import production
+
+    if action == "pause":
+        production.pause("paused manually")
+    elif action == "resume":
+        console.print("resumed" if production.resume() else "was not paused")
+    elif action != "status":
+        console.print("[red]action must be status, pause or resume[/red]")
+        raise typer.Exit(2)
+    st = production.status()
+    console.print_json(data=st or {"paused": False})
 
 
 @app.command("telegram-test")

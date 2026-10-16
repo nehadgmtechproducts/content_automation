@@ -8,12 +8,13 @@ alembic==1.14.0
 psycopg[binary]==3.2.3
 celery[redis]==5.4.0
 redis==5.2.1
-typer==0.15.1
-# Pinned explicitly: typer 0.15.1's --help rendering calls click's old
-# Parameter.make_metavar(self) signature. click>=8.2 requires make_metavar(self, ctx)
-# and --help crashes with TypeError. celery/typer would otherwise pull in the newer
-# click transitively with no pin of their own.
-click==8.1.8
+typer==0.27.2
+# typer and click must move together: typer < 0.16 calls click's old
+# Parameter.make_metavar(self) and crashes `--help` on click >= 8.2. spaCy 3.8.16 (the first
+# 3.8.x with Linux ARM wheels, needed for the Docker image) requires click >= 8.2.1, so
+# click can no longer be held back — typer is the one that moves. tests/test_cli_help.py
+# renders --help for every command to catch this pairing breaking again.
+click==8.5.0
 rich==13.9.4
 PyYAML==6.0.2
 tenacity==9.0.0
@@ -23,7 +24,7 @@ httpx==0.28.1
 feedparser==6.0.11
 
 # --- stage 2: detect ---
-spacy==3.8.3
+spacy==3.8.16
 sentence-transformers==3.3.1
 numpy==2.2.1
 rapidfuzz==3.11.0

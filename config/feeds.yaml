@@ -1,0 +1,131 @@
+# Multi-category source list: Technology, Politics, Finance, Entertainment (incl. sports),
+# Launches (cars, bikes, phones, gadgets). Categories are decided later by the drafting
+# step from a fixed taxonomy (app/categories.py) — sources here are grouped by comment only.
+# tier 1 = original reporting  |  tier 2 = aggregator/secondary  |  tier 3 = social/community
+# A cluster needs >= 1 tier-1 source before it can fire (see detect/velocity.py).
+
+defaults:
+  timeout_seconds: 20
+  # Sources are polled concurrently, but requests to the SAME host are serialized and
+  # spaced by this much. Four subreddits hitting reddit.com at once is a guaranteed 429.
+  per_host_delay_seconds: 2.0
+  host_delay_overrides:
+    # Unauthenticated Reddit RSS rate-limits hard, and four subreddits share this host.
+    # ~24s added to a poll that runs every 10 minutes is a fine trade.
+    reddit.com: 7.0
+  user_agent: "content-engine/0.1 (+https://example.com/bot)"
+
+sources:
+  # ---------------- tier 1: original reporting ----------------
+  - id: techcrunch
+    type: rss
+    tier: 1
+    url: https://techcrunch.com/feed/
+  - id: theverge
+    type: rss
+    tier: 1
+    url: https://www.theverge.com/rss/index.xml
+  - id: arstechnica
+    type: rss
+    tier: 1
+    url: https://feeds.arstechnica.com/arstechnica/index
+  - id: venturebeat_ai
+    type: rss
+    tier: 1
+    url: https://venturebeat.com/category/ai/feed/
+  - id: wired_business
+    type: rss
+    tier: 1
+    url: https://www.wired.com/feed/category/business/latest/rss
+  # ---- politics / world ----
+  - {id: bbc_world, type: rss, tier: 1, url: "https://feeds.bbci.co.uk/news/world/rss.xml"}
+  - {id: bbc_politics, type: rss, tier: 1, url: "https://feeds.bbci.co.uk/news/politics/rss.xml"}
+  - {id: guardian_world, type: rss, tier: 1, url: "https://www.theguardian.com/world/rss"}
+  - {id: aljazeera, type: rss, tier: 1, url: "https://www.aljazeera.com/xml/rss/all.xml"}
+  - {id: npr_politics, type: rss, tier: 1, url: "https://feeds.npr.org/1014/rss.xml"}
+  - {id: politico, type: rss, tier: 1, url: "https://rss.politico.com/politics-news.xml"}
+  - {id: nyt_politics, type: rss, tier: 1, url: "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml"}
+  # ---- finance / markets ----
+  - {id: cnbc_top, type: rss, tier: 1, url: "https://www.cnbc.com/id/100003114/device/rss/rss.html"}
+  - {id: marketwatch, type: rss, tier: 1, url: "https://feeds.marketwatch.com/marketwatch/topstories/"}
+  - {id: bbc_business, type: rss, tier: 1, url: "https://feeds.bbci.co.uk/news/business/rss.xml"}
+  - {id: guardian_business, type: rss, tier: 1, url: "https://www.theguardian.com/business/rss"}
+  # ---- entertainment & sports ----
+  - {id: variety, type: rss, tier: 1, url: "https://variety.com/feed/"}
+  - {id: hollywood_reporter, type: rss, tier: 1, url: "https://www.hollywoodreporter.com/feed/"}
+  - {id: deadline, type: rss, tier: 1, url: "https://deadline.com/feed/"}
+  - {id: rolling_stone, type: rss, tier: 1, url: "https://www.rollingstone.com/feed/"}
+  - {id: bbc_entertainment, type: rss, tier: 1, url: "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml"}
+  - {id: espn, type: rss, tier: 1, url: "https://www.espn.com/espn/rss/news"}
+  - {id: bbc_sport, type: rss, tier: 1, url: "https://feeds.bbci.co.uk/sport/rss.xml"}
+  - {id: guardian_sport, type: rss, tier: 1, url: "https://www.theguardian.com/sport/rss"}
+  - {id: sky_sports, type: rss, tier: 1, url: "https://www.skysports.com/rss/12040"}
+  # ---- launches: cars, bikes, phones, gadgets ----
+  - {id: motor1, type: rss, tier: 1, url: "https://www.motor1.com/rss/news/all/"}
+  - {id: car_and_driver, type: rss, tier: 1, url: "https://www.caranddriver.com/rss/all.xml/"}
+  - {id: engadget, type: rss, tier: 1, url: "https://www.engadget.com/rss.xml"}
+  - {id: gsmarena, type: rss, tier: 1, url: "https://www.gsmarena.com/rss-news-reviews.php3"}
+  - {id: electrek, type: rss, tier: 1, url: "https://electrek.co/feed/"}
+  # ---------------- tier 2: Google News topical queries ----------------
+  # Google News republishes originals; ingest/normalize.py resolves each item back to
+  # its true publisher domain so a cluster is not credited three times to news.google.com.
+  - id: gnews_ai
+    type: google_news
+    tier: 2
+    query: "artificial intelligence OR LLM OR \"AI model\""
+  - id: gnews_ai_funding
+    type: google_news
+    tier: 2
+    query: "AI startup funding OR acquisition"
+  - id: gnews_chips
+    type: google_news
+    tier: 2
+    query: "Nvidia OR AMD OR TSMC OR \"AI chip\""
+  - id: gnews_bigtech
+    type: google_news
+    tier: 2
+    query: "OpenAI OR Anthropic OR \"Google DeepMind\" OR Meta AI OR Microsoft AI"
+  - id: gnews_policy
+    type: google_news
+    tier: 2
+    query: "AI regulation OR \"AI policy\" OR \"AI lawsuit\""
+
+  # ---- google news: politics / finance / entertainment / sports / launches ----
+  - {id: gnews_politics, type: google_news, tier: 2, query: "election OR parliament OR \"Supreme Court\" OR sanctions OR ceasefire"}
+  - {id: gnews_world_conflict, type: google_news, tier: 2, query: "war OR conflict OR protests OR diplomacy"}
+  - {id: gnews_markets, type: google_news, tier: 2, query: "stock market OR earnings OR \"interest rates\" OR inflation"}
+  - {id: gnews_crypto, type: google_news, tier: 2, query: "bitcoin OR ethereum OR crypto market"}
+  - {id: gnews_movies_tv, type: google_news, tier: 2, query: "box office OR \"Netflix series\" OR movie release OR Oscars"}
+  - {id: gnews_sports, type: google_news, tier: 2, query: "cricket OR football OR NBA OR \"Formula 1\" OR tennis"}
+  - {id: gnews_cars, type: google_news, tier: 2, query: "new car launch OR electric car unveiled OR SUV launched"}
+  - {id: gnews_bikes, type: google_news, tier: 2, query: "new motorcycle launch OR bike unveiled OR scooter launched"}
+  - {id: gnews_phones, type: google_news, tier: 2, query: "smartphone launch OR iPhone OR Galaxy OR Pixel unveiled"}
+
+  # ---------------- tier 3: community signal ----------------
+  # Reddit is polled over RSS (the .json API 403s non-browser clients). RSS carries no
+  # score, so `limit` caps volume instead of `min_score`, and items are attributed to
+  # reddit.com rather than to a publisher — see _fetch_reddit for why.
+  - id: hn
+    type: hackernews
+    tier: 3
+    min_points: 100
+  - id: r_technology
+    type: reddit
+    tier: 3
+    subreddit: technology
+    limit: 25
+  - id: r_machinelearning
+    type: reddit
+    tier: 3
+    subreddit: MachineLearning
+    limit: 25
+  - id: r_localllama
+    type: reddit
+    tier: 3
+    subreddit: LocalLLaMA
+    limit: 25
+  - id: r_singularity
+    type: reddit
+    tier: 3
+    subreddit: singularity
+    limit: 25

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.assets.pipeline import produce_assets
 from app.db import session_scope
 from app.detect.velocity import run_detection, top_articles_for_topic
+from app import production
 from app.freshness import check_freshness
 from app.ingest.fetch import ingest_once
 from app.models import (
@@ -20,7 +21,7 @@ from app.models import (
 from app.approval import service as approval_service
 from app.scrape.client import scrape
 from app.settings import detect_config, get_settings
-from app.synth.engine import SourceDoc, SynthesisError
+from app.synth.engine import BillingError, SourceDoc, SynthesisError
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,17 @@ def _fail(topic_id: int, message: str) -> None:
 def run_poll() -> dict:
     """Stage 1 + 2: ingest every feed, then score the window."""
     report = ingest_once()
+    probe = None
+    if get_settings().synthesis_provider == "fal":
+        from app.synth.engine_fal import probe
+    if not production.allowed(probe):
+        # Ingest still ran (it is free and keeps the history fresh); firing topics is held.
+        paused = production.status() or {}
+        log.warning("detection skipped: production paused since %s (%s)",
+                    paused.get("since"), (paused.get("reason") or "")[:120])
+        return {"inserted": report.inserted, "duplicates": report.skipped_duplicates,
+                "failed_sources": report.failed_sources, "clusters": 0, "topics_fired": 0,
+                "topic_ids": [], "detections": [], "paused": paused}
     detections = run_detection()
     fired = [d for d in detections if d["fired"]]
     return {
@@ -136,6 +148,8 @@ def run_synthesis(topic_id: int) -> dict:
     try:
         facts, draft, notes = synthesize(docs)
     except SynthesisError as exc:
+        if isinstance(exc, BillingError):
+            production.pause(str(exc))      # not this story's fault: stop burning stories
         _fail(topic_id, f"synthesis refused: {exc}")
         return {"topic_id": topic_id, "ok": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001
@@ -176,11 +190,11 @@ def run_assets(topic_id: int) -> dict:
             _fail(topic_id, "no draft to produce assets from")
             return {"topic_id": topic_id, "ok": False}
         check = check_freshness(topic.created_at, detect_config()["freshness"]["max_age_hours"])
+        article, script, meta = dict(draft.article), dict(draft.script), dict(draft.meta)
+        entity = topic.primary_entity
     if not check.fresh:
         _fail(topic_id, check.reason)
         return {"topic_id": topic_id, "ok": False, "error": check.reason}
-        article, script, meta = dict(draft.article), dict(draft.script), dict(draft.meta)
-        entity = topic.primary_entity
 
     try:
         result = produce_assets(topic_id, article, script, meta, entity=entity)

@@ -42,6 +42,10 @@ RUN set -eux; \
 
 WORKDIR /srv
 COPY requirements.txt .
+# CPU-only PyTorch first. The default PyPI wheel on Linux drags in ~3GB of NVIDIA CUDA
+# libraries that a CPU server never uses; sentence-transformers then sees torch as already
+# installed and doesn't pull the CUDA build.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt \
     && python -m spacy download en_core_web_sm
 

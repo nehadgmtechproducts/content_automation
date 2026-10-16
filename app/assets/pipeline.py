@@ -12,7 +12,10 @@ from app.assets.align import align
 from app.assets.render import Segment, beat_spans, plan_segments, probe, render
 from app.assets.subtitles import write_ass
 from app.providers.base import BrollRequest, ImageRequest, VoiceRequest, load_providers
+from app.providers.image_pillow import generate_cover
 from app.settings import get_settings
+from app.assets.safety import footage_context, safe_shot
+from app.categories import normalize_category
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +30,7 @@ class AssetResult:
     video: Path
     duration: float
     providers_used: dict
+    cover_image: Path | None = None   # text-free website cover (see generate_cover)
 
 
 def _word_count(text: str) -> int:
@@ -97,6 +101,11 @@ def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
         out_dir / "hero_vertical.jpg",
     )
 
+    # --- website cover: same palette, no text. Always the local Pillow renderer, even when a
+    # paid image provider is configured: it is a styling element, not generated art, and it must
+    # stay deterministic and free of invented imagery. ---
+    cover = generate_cover(entity or headline, out_dir / "cover.jpg")
+
     # --- voiceover, paced to the script's target length ---
     narration = narration_text(script)
     if not narration:
@@ -127,12 +136,20 @@ def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
             beat_clips.append(None)
         else:
             query = beat.get("broll_query") or entity or headline
+            query, replaced = safe_shot(metadata.get("category"), query)
+            if replaced:
+                log.warning("beat %s: risky shot for a %s story replaced with a symbolic one",
+                            i, metadata.get("category"))
             cap = providers.broll.max_clip_seconds
             n = max(1, math.ceil(span / cap)) if cap else 1
             for j in range(n):
                 q = query if j == 0 else f"{query}, {ANGLE_VARIANTS[(j - 1) % len(ANGLE_VARIANTS)]}"
                 fetched = providers.broll.fetch(
-                    BrollRequest(query=q, seconds=span / n, index=clip_no, context=headline), out_dir)
+                    BrollRequest(query=q, seconds=span / n, index=clip_no,
+                                 context=footage_context(metadata.get("category"), headline),
+                                 text=beat.get("on_screen_text") or "",
+                                 label=normalize_category(metadata.get("category")) or metadata.get("category") or "",
+                                 step=i + 1, steps=len(beats)), out_dir)
                 clip_no += 1
                 if fetched:
                     beat_clips.append(fetched.path)
@@ -173,7 +190,7 @@ def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
     return AssetResult(
         directory=out_dir, hero_image=hero, hero_vertical=hero_vertical,
         voiceover=voice_path, subtitles=ass_path, video=video,
-        duration=actual, providers_used=providers.used,
+        duration=actual, providers_used=providers.used, cover_image=cover,
     )
 
 

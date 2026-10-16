@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from app.categories import CategoryName
 from pydantic import BaseModel, Field
 
 
@@ -86,7 +87,10 @@ class MetadataOut(BaseModel):
     hashtags: list[str] = Field(description="Platform-ready, with the leading #.")
     thumbnail_text: str = Field(description="<= 5 words for the video thumbnail.")
     music_mood: str
-    category: str
+    category: CategoryName = Field(
+        description="Exactly one category: Technology, Politics, Finance, Entertainment "
+                    "or Launches. A product launch is Launches even if it is a gadget; "
+                    "sports belong to Entertainment.")
 
 
 class DraftOut(BaseModel):

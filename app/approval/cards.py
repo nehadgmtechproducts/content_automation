@@ -88,7 +88,7 @@ def decide(current_status: TopicStatus, action: str) -> tuple[TopicStatus, str, 
 
     new_status = _ACTION_TO_STATUS[action]
     if new_status is TopicStatus.approved:
-        toast = "Approved. (Publishing isn't built yet — this only records the decision.)"
+        toast = "Approved."
     else:
         toast = "Discarded."
     return new_status, toast, True

@@ -90,7 +90,8 @@ def push_for_approval(topic_id: int, client: TelegramClient | None = None) -> di
     return {"sent": True, "message_id": video_res["message_id"]}
 
 
-def process_decision(update: dict, client: TelegramClient | None = None) -> dict:
+def process_decision(update: dict, client: TelegramClient | None = None,
+                     publisher=None) -> dict:
     """Handle one Telegram update. Ignores anything that isn't a button press on a
     card we sent, rather than raising — the poller sees plenty of update shapes."""
     callback = update.get("callback_query")
@@ -98,6 +99,8 @@ def process_decision(update: dict, client: TelegramClient | None = None) -> dict
         return {"handled": False, "reason": "not a callback_query update"}
 
     client = client or _client()
+    if publisher is None:
+        from app.publishers.web import publish_topic as publisher
     settings = get_settings()
     callback_id = callback["id"]
     message = callback.get("message", {})
@@ -129,15 +132,32 @@ def process_decision(update: dict, client: TelegramClient | None = None) -> dict
                 card.decision = action
                 card.decided_at = datetime.now(timezone.utc)
 
+    # Approve -> publish to the website. Done before answering the callback so the
+    # toast and the edited caption can say what actually happened.
+    published: dict | None = None
+    if changed and action == "approve":
+        published = publisher(topic_id)
+        if published.get("published"):
+            toast = "Approved and published to the website."
+        else:
+            toast = "Approved, but website publish failed."
+            log.error("topic %s approved but not published: %s", topic_id, published.get("reason"))
+
     client.answer_callback_query(callback_id, toast)
 
     if changed and message.get("message_id") is not None:
-        icon = "✅ Approved" if action == "approve" else "❌ Discarded"
+        if action != "approve":
+            icon = "❌ Discarded"
+        elif published and published.get("published"):
+            icon = f"✅ Approved · 🌐 Published ({published['path']})"
+        else:
+            icon = f"✅ Approved · ⚠️ website publish failed: {(published or {}).get('reason', '')[:200]}"
         caption = f"{message.get('caption', '')}\n\n{icon}".strip()
         client.edit_message_caption(chat_id, message["message_id"], caption)
 
     log.info("topic %s: %s (changed=%s)", topic_id, action, changed)
-    return {"handled": True, "action": action, "topic_id": topic_id, "changed": changed}
+    return {"handled": True, "action": action, "topic_id": topic_id, "changed": changed,
+            "published": published}
 
 
 def poll_once(client: TelegramClient | None = None) -> int:

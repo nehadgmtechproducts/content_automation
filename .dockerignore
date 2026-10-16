@@ -1,0 +1,19 @@
+# Never bake secrets or local state into an image: `COPY . .` would otherwise copy the
+# real .env (API keys, Telegram token), the 1.5GB virtualenv, rendered media and the DB.
+.env
+.env.*
+!.env.example
+.venv/
+.git/
+.gitignore
+.pytest_cache/
+__pycache__/
+*.pyc
+media/
+models/
+pgdata/
+n8n_data/
+fixtures/generated/
+tests/
+*.egg-info/
+.DS_Store

@@ -148,3 +148,14 @@ def test_get_updates_with_no_offset_omits_it():
 def test_missing_token_fails_fast_before_any_request():
     with pytest.raises(TelegramError, match="no Telegram bot token"):
         TelegramClient("")
+
+
+def test_cli_logging_never_emits_the_bot_token(caplog):
+    """Telegram puts the token in the URL path and httpx logs URLs at INFO."""
+    import logging
+
+    from app.cli import _setup_logging
+
+    _setup_logging(verbose=True)
+    for name in ("httpx", "httpcore"):
+        assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING

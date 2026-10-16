@@ -86,7 +86,7 @@ def test_decide_approve_from_pending():
     status, toast, changed = decide(TopicStatus.pending_approval, "approve")
     assert status == TopicStatus.approved
     assert changed
-    assert "Publishing isn't built yet" in toast
+    assert toast == "Approved."
 
 
 def test_decide_discard_from_pending():

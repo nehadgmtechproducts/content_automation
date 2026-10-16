@@ -160,10 +160,13 @@ def _video_filter(idx: int, seg: Segment) -> str:
             f"crop={WIDTH}:{HEIGHT},fps={FPS},setsar=1,format=yuv420p[v{idx}]"
         )
     # Ken Burns on a still: upscale first so the zoom doesn't reveal interpolation jitter.
+    # Text cards get a much smaller zoom: at the photo setting (1.30x) the frame loses ~124px
+    # per side, which crops the card's 90px text margin and cuts words off the screen.
+    zoom = "min(zoom+0.00018,1.06)" if seg.path.name.startswith("textcard_") else "min(zoom+0.0012,1.30)"
     return (
         f"[{idx}:v]scale={WIDTH * 2}:{HEIGHT * 2}:force_original_aspect_ratio=increase,"
         f"crop={WIDTH * 2}:{HEIGHT * 2},"
-        f"zoompan=z='min(zoom+0.0012,1.30)':d={frames}:"
+        f"zoompan=z='{zoom}':d={frames}:"
         f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={WIDTH}x{HEIGHT}:fps={FPS},"
         f"setsar=1,format=yuv420p[v{idx}]"
     )

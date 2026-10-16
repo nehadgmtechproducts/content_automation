@@ -136,13 +136,21 @@ def test_provider_loader_uses_fal_only_when_a_key_exists(monkeypatch):
     import app.settings as settings_mod
     from app.providers.base import load_providers
 
-    def with_key(key):
+    real = settings_mod.providers_config()
+
+    def with_key(key, active="fal"):
+        # Supply the b-roll choice here: the deployed providers.yaml changes (it is
+        # `text_cards` while the fal balance is empty) and must not decide this test.
+        cfg = {**real, "broll": {**real["broll"], "active": active}}
         s = SimpleNamespace(fal_key=key, pexels_api_key="", replicate_api_token="", elevenlabs_api_key="")
         monkeypatch.setattr(settings_mod, "get_settings", lambda: s)
+        monkeypatch.setattr(settings_mod, "providers_config", lambda: cfg)
         return load_providers().used["broll"]
 
     assert with_key("a:b") == "fal_gemini_omni"
     assert with_key("") == "stills_only"       # degrades instead of crashing
+    assert with_key("a:b", active="text_cards") == "text_cards"   # needs no key at all
+    assert with_key("", active="text_cards") == "text_cards"
 
 
 # ------------------------------------------------------------ scripting, fake fal LLM

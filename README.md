@@ -240,6 +240,41 @@ time (falling back to fetch time only when a feed gives none) is older than
 `freshness.max_age_hours`, so a 3-day-old story fetched today can't fire as "breaking".
 `export-web` only exports `approved`/`published` topics (override: `--allow-unapproved`).
 
+## Categories (not just tech)
+
+The engine covers five categories, defined once in `app/categories.py`: **Technology,
+Politics, Finance, Entertainment** (including sports) and **Launches** (cars, bikes, phones,
+gadgets). Sources live in `config/feeds.yaml` (49 feeds). The drafting step must pick
+exactly one category (enforced by the output schema, so the model can't invent labels), and
+the exporter maps legacy labels onto the list or refuses to publish.
+
+- **Per-category editorial rules** are in the drafting prompt (`DRAFT_SYSTEM`): politics
+  attributes every claim and never predicts or endorses; finance never gives advice or price
+  forecasts; launches attributes specs and prices to the manufacturer.
+- **Visual safety (`app/assets/safety.py`).** Generated footage is photoreal, so for
+  Politics any shot showing people, soldiers, crowds, flags, weapons or violence is replaced
+  with a symbolic people-free one, and the headline is withheld from the footage prompt.
+  Prompt rules are a request; this is the code-level backstop.
+- **Cost cap.** `trigger.max_topics_per_day` (default 8, rolling 24h, counts manual topics
+  too) stops a busy news day from auto-producing dozens of ~$1.50 videos. `detect --dry-run`
+  applies it, so dry-run output matches production.
+- The web site's `src/core/categories.ts` must mirror `NAMES` here.
+- Logging never prints the Telegram bot token (httpx URL logging is forced to WARNING).
+
+## Website images and file names
+
+Stage 4 makes three still images per story, and the exporter publishes them to the website:
+
+| File (in `media/<id>/`) | Website name | Used for |
+|---|---|---|
+| `cover.jpg` (1600x900, **no text**) | `cover-<hash>.jpg` -> `heroImage` | The page cover. The website draws the headline over it as real HTML, so it is selectable and searchable. Made by `generate_cover()` in `app/providers/image_pillow.py`. |
+| `hero.jpg` (1200x675, headline printed on it) | `social-<hash>.jpg` -> `socialImage` | Link previews (Open Graph / Twitter) only. |
+| `hero_vertical.jpg` + `final.mp4` | `poster-<hash>.jpg`, `video-<hash>.mp4` | The video and its poster. |
+
+- **Hash in the filename.** Next.js caches resized images by URL, and browsers/CDNs cache videos by URL, so overwriting a file at the same URL keeps serving the old one. A new content hash is a new URL, so a regenerated cover or re-rendered video can never go stale. Superseded files are deleted only *after* the new JSON is written, so the live page never points at a missing file.
+- **Old stories** rendered before covers existed get one generated at export time from their entity.
+- **The Docker image bakes in the code.** After changing the exporter, run `docker compose build worker && docker compose up -d` or the `approvals` container will keep publishing with the old exporter.
+
 ---
 
 ## Before stage 6

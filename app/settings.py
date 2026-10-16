@@ -77,7 +77,7 @@ def get_settings() -> Settings:
 
 @lru_cache(maxsize=1)
 def feeds_config() -> dict[str, Any]:
-    return _load_yaml("feeds.tech.yaml")
+    return _load_yaml("feeds.yaml")
 
 
 @lru_cache(maxsize=1)

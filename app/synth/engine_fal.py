@@ -24,7 +24,7 @@ from openai import OpenAI
 
 from app.settings import get_settings
 from app.synth.engine import (  # provider-agnostic — reused, not reimplemented
-    DRAFT_SYSTEM, FACTS_SYSTEM, CallResult, SourceDoc, SynthesisError,
+    DRAFT_SYSTEM, FACTS_SYSTEM, BillingError, CallResult, SourceDoc, SynthesisError,
     _render_sources, validate_grounding,
 )
 from app.synth.schemas import DraftOut, FactSheetOut
@@ -55,8 +55,21 @@ def _explain(exc: openai.APIStatusError, stage: str) -> SynthesisError:
     detail = exc.body if exc.body else exc.message
     text = f"{stage}: fal returned HTTP {exc.status_code}: {detail}"
     if "locked" in str(detail).lower() or "balance" in str(detail).lower():
-        text += " — the fal account has no balance; top up at fal.ai/dashboard/billing"
+        return BillingError(text + " — the fal account has no balance; top up at fal.ai/dashboard/billing")
     return SynthesisError(text)
+
+
+def probe() -> bool:
+    """Cheapest possible 'is production possible again?' check: a 5-token completion.
+    Used only while production is paused for billing; a locked account answers 403 instantly."""
+    try:
+        _client().chat.completions.create(
+            model=get_settings().fal_llm_model,
+            messages=[{"role": "user", "content": "Reply: ok"}], max_tokens=5)
+        return True
+    except Exception as exc:  # noqa: BLE001 - any failure means "not yet"
+        log.info("production probe: still unavailable (%s)", type(exc).__name__)
+        return False
 
 
 def _parse_or_raise(response, stage: str):

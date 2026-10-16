@@ -42,6 +42,11 @@ class BrollRequest:
     seconds: float
     index: int
     context: str = ""        # the story headline, so footage can show the actual subject
+    # Used only by the text-card provider (typographic videos with no generated footage):
+    text: str = ""           # the beat's on-screen line
+    label: str = ""          # category name shown on the card
+    step: int = 0            # 1-based beat number
+    steps: int = 0           # total beats
 
 
 @dataclass
@@ -135,6 +140,11 @@ def load_providers() -> ProviderSet:
         from app.providers.broll_fal import FalBroll
 
         broll = FalBroll(cfg["broll"].get("fal", {}))
+        used["broll"] = broll.name
+    elif broll_choice == "text_cards":
+        from app.providers.broll_text import TextCardBroll
+
+        broll = TextCardBroll(cfg["broll"].get("text_cards") or {})
         used["broll"] = broll.name
     elif broll_choice == "pexels" and settings.pexels_api_key:
         from app.providers.broll_pexels import PexelsBroll

@@ -114,3 +114,41 @@ class PillowEditorialCard(ImageProvider):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         img.save(out_path, quality=92)
         return out_path
+
+
+COVER_WIDTH, COVER_HEIGHT = 1600, 900
+
+
+def generate_cover(seed: str, out_path: Path, width: int = COVER_WIDTH, height: int = COVER_HEIGHT) -> Path:
+    """Text-free cover image for the website.
+
+    The same palette as the titled card for that story (keyed on `seed`, normally the entity),
+    but with no words on it. The website draws the headline itself, as real HTML, over this
+    image; a cover that already contained the headline would show it twice and would keep the
+    text out of reach of screen readers, translation and search. The titled card is still made
+    (hero.jpg) and is used for link previews.
+
+    Deterministic: the same seed always produces the same bytes.
+    """
+    w, h = width, height
+    dark, light, accent = _palette(seed)
+    img = _gradient((w, h), light, dark)
+
+    for box, strength in (
+        ([int(w * 0.50), int(-h * 0.40), int(w * 1.40), int(h * 0.70)], 120),
+        ([int(-w * 0.30), int(h * 0.45), int(w * 0.45), int(h * 1.40)], 70),
+    ):
+        bloom = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(bloom).ellipse(box, fill=strength)
+        bloom = bloom.filter(ImageFilter.GaussianBlur(int(h * 0.16)))
+        img = Image.composite(Image.new("RGB", (w, h), accent), img, bloom)
+
+    # Soft vignette: corners sit back, so text drawn over the cover stays readable.
+    vignette = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(vignette).ellipse([int(-w * 0.2), int(-h * 0.2), int(w * 1.2), int(h * 1.2)], fill=255)
+    vignette = vignette.filter(ImageFilter.GaussianBlur(int(h * 0.25)))
+    img = Image.composite(img, Image.new("RGB", (w, h), dark), vignette)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out_path, quality=90)
+    return out_path
