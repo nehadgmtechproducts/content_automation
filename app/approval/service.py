@@ -16,12 +16,14 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.approval.cards import (
-    build_keyboard, build_metadata_text, build_photo_caption, build_video_caption, decide,
-    parse_callback_data,
+    build_article_messages, build_keyboard, build_metadata_text, build_photo_caption,
+    build_review_caption, build_video_caption, decide, parse_callback_data,
 )
 from app.approval.telegram_client import TelegramClient, TelegramError
 from app.db import session_scope
-from app.models import ApprovalCard, AssetBundle, Draft, TelegramCursor, Topic, TopicStatus
+from app.models import (
+    ApprovalCard, AssetBundle, Draft, ScrapedArticle, TelegramCursor, Topic, TopicStatus,
+)
 from app.settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -46,6 +48,12 @@ def push_for_approval(topic_id: int, client: TelegramClient | None = None) -> di
       3. text        — full metadata block              (spec: "Optimized Metadata")
     Only the video message (#2) carries the buttons and is the one later edited in
     place once a decision comes back — see process_decision().
+
+    Articles-only topics (no video in the bundle) get a different layout, because the
+    reviewer has nothing to watch and must be able to READ what will be published:
+      1. the full article as plain-text message(s), sources included
+      2. text — the metadata block
+      3. hero image — caption + buttons, LAST so they sit right under what is being judged
     """
     if not is_configured():
         return {"sent": False, "reason": "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set"}
@@ -59,18 +67,31 @@ def push_for_approval(topic_id: int, client: TelegramClient | None = None) -> di
         article, metadata = dict(draft.article), dict(draft.meta)
         entity = topic.primary_entity
         hero_path, video_path = bundle.hero_image, bundle.video
+        sources = [{"index": r.source_index, "title": r.title, "url": r.url} for r in
+                   s.query(ScrapedArticle).filter_by(topic_id=topic_id)
+                   .order_by(ScrapedArticle.source_index)]
 
     settings = get_settings()
     chat_id = settings.telegram_chat_id
     client = client or _client()
 
     try:
-        photo_res = client.send_photo(chat_id, hero_path, build_photo_caption(article))
-        video_res = client.send_video(
-            chat_id, video_path, build_video_caption(article, entity),
-            reply_markup=build_keyboard(topic_id),
-        )
-        meta_res = client.send_message(chat_id, build_metadata_text(metadata))
+        if video_path:
+            photo_res = client.send_photo(chat_id, hero_path, build_photo_caption(article))
+            video_res = client.send_video(
+                chat_id, video_path, build_video_caption(article, entity),
+                reply_markup=build_keyboard(topic_id),
+            )
+            meta_res = client.send_message(chat_id, build_metadata_text(metadata))
+        else:
+            for text in build_article_messages(article, sources):
+                client.send_message(chat_id, text)
+            meta_res = client.send_message(chat_id, build_metadata_text(metadata))
+            video_res = client.send_photo(
+                chat_id, hero_path, build_review_caption(article),
+                reply_markup=build_keyboard(topic_id),
+            )
+            photo_res = {}   # the buttons' photo is the card's main message
     except TelegramError as exc:
         log.error("failed to push approval card for topic %s: %s", topic_id, exc)
         return {"sent": False, "reason": str(exc)}

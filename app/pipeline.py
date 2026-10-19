@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.assets.pipeline import produce_assets
 from app.db import session_scope
 from app.detect.velocity import run_detection, top_articles_for_topic
-from app import production
+from app import production, stories
 from app.freshness import check_freshness
 from app.ingest.fetch import ingest_once
 from app.models import (
@@ -39,8 +39,11 @@ def run_poll() -> dict:
     """Stage 1 + 2: ingest every feed, then score the window."""
     report = ingest_once()
     probe = None
-    if get_settings().synthesis_provider == "fal":
+    provider = get_settings().synthesis_provider
+    if provider == "fal":
         from app.synth.engine_fal import probe
+    elif provider == "nvidia":
+        from app.synth.engine_nvidia import probe
     if not production.allowed(probe):
         # Ingest still ran (it is free and keeps the history fresh); firing topics is held.
         paused = production.status() or {}
@@ -92,7 +95,7 @@ def run_scrape(topic_id: int) -> dict:
             if result is None:
                 continue
             s.add(ScrapedArticle(
-                topic_id=topic_id, source_index=index, url=item.canonical_url,
+                topic_id=topic_id, source_index=index, url=result.url or item.canonical_url,
                 domain=item.domain, title=result.title or item.title,
                 byline=result.byline, published_at=result.published_at or item.published_at,
                 markdown=result.markdown, scraper=result.scraper,
@@ -142,6 +145,8 @@ def run_synthesis(topic_id: int) -> dict:
         from app.synth.engine_openai import synthesize
     elif provider == "fal":
         from app.synth.engine_fal import synthesize
+    elif provider == "nvidia":
+        from app.synth.engine_nvidia import synthesize
     else:
         from app.synth.engine import synthesize
 
@@ -172,6 +177,8 @@ def run_synthesis(topic_id: int) -> dict:
         topic.title = draft.payload["article"].get("title") or topic.title
         topic.error = ""
 
+    stories.assign_story(topic_id)      # which ongoing story is this an update of? (never raises)
+
     return {
         "topic_id": topic_id, "ok": True, "validation_notes": notes,
         "tokens": {
@@ -182,7 +189,7 @@ def run_synthesis(topic_id: int) -> dict:
 
 
 def run_assets(topic_id: int) -> dict:
-    """Stage 4: hero image, voiceover, subtitles, rendered vertical MP4."""
+    """Stage 4: article images; plus voiceover, subtitles and a vertical MP4 when GENERATE_VIDEO is on."""
     with session_scope() as s:
         draft = s.scalar(select(Draft).where(Draft.topic_id == topic_id))
         topic = s.get(Topic, topic_id)
@@ -206,8 +213,10 @@ def run_assets(topic_id: int) -> dict:
         s.query(AssetBundle).filter(AssetBundle.topic_id == topic_id).delete()
         s.add(AssetBundle(
             topic_id=topic_id, directory=str(result.directory),
-            hero_image=str(result.hero_image), voiceover=str(result.voiceover),
-            subtitles=str(result.subtitles), video=str(result.video),
+            hero_image=str(result.hero_image),
+            # Absent in articles-only mode: stored as "" (the columns' default).
+            voiceover=str(result.voiceover or ""), subtitles=str(result.subtitles or ""),
+            video=str(result.video or ""),
             duration_seconds=result.duration, providers_used=result.providers_used,
         ))
         topic = s.get(Topic, topic_id)
@@ -226,7 +235,7 @@ def run_assets(topic_id: int) -> dict:
         approval = {"sent": False, "reason": "Telegram not configured"}
 
     return {
-        "topic_id": topic_id, "ok": True, "video": str(result.video),
+        "topic_id": topic_id, "ok": True, "video": str(result.video) if result.video else None,
         "duration": result.duration, "providers": result.providers_used,
         "approval": approval,
     }

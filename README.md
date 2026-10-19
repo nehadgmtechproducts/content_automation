@@ -11,6 +11,25 @@ laid down in `app/publishers/base.py` so they attach without touching anything u
 
 ---
 
+## Articles-only mode (current default)
+
+`GENERATE_VIDEO=false` (the default) makes Stage 4 produce **only the article's images** — the
+titled `hero.jpg` and the text-free `cover.jpg`. No voiceover, subtitles, b-roll or MP4 is made, so
+those fal footage charges, Piper and FFmpeg steps are skipped. Set `GENERATE_VIDEO=true` to bring
+video back; nothing else needs to change (the exporter, the website's `SHOW_VIDEOS` switch and the
+database already treat video as optional).
+
+- **Telegram review** — with no video to watch, the card is: the **full article as plain text**
+  (several messages if long, sources included) → the metadata block → the hero image carrying the
+  **Approve / Discard** buttons, last, so they sit right under what is being judged.
+- **Export** — `video`/`poster` are written only when `final.mp4` and `hero_vertical.jpg` exist, so
+  new stories export with no `video` key and older stories keep theirs.
+- **Cover pictures** — each story gets one AI illustration (FLUX.2-klein on NVIDIA's API, ~3 s, same `NVIDIA_API_KEY`), written from the story's own first shot description and screened by the same safety rules as video footage (Politics: no people/crowds, headline withheld). It becomes the website cover and the background of the titled `hero.jpg` card. NVIDIA's content filter sometimes refuses brand/logo wording, so a refusal retries once with a generic scene for the category; if that also fails the local gradient is used, so image generation can never block a story. The exporter records the source (`cover.source`) and the website shows "Illustration generated with AI" under AI covers. Switch off with `AI_IMAGES=false`.
+- The script the model writes is still generated (it comes from the same call as the article), but it is not used.
+- After changing this, rebuild so the containers pick it up: `docker compose build worker && docker compose up -d`.
+
+---
+
 ## Quick start
 
 ```bash
@@ -259,6 +278,12 @@ the exporter maps legacy labels onto the list or refuses to publish.
   too) stops a busy news day from auto-producing dozens of ~$1.50 videos. `detect --dry-run`
   applies it, so dry-run output matches production.
 - The web site's `src/core/categories.ts` must mirror `NAMES` here.
+
+**Stories (timelines).** `app/stories.py` groups follow-up reports: after a draft is written, it joins a recent story or starts a new one, recording `story_key` / `story_label` in the draft's metadata (no migration). The label is the AI's short name for the ongoing subject (`story_label` in the draft). Matching is local and free (the detector's MiniLM embeddings) and was calibrated on real headline pairs: follow-ups scored 0.58-0.83, different stories about the same company 0.11-0.31, but two unrelated "AI agent permissions" stories 0.52, so a draft joins a story only if it has the **same entity and similarity >= 0.45**, or **any entity and >= 0.75**, within 7 days. Grouping never blocks production: any failure just makes the draft its own story. The exporter writes `story: {key, label}`; drafts that predate stories form a story of their own.
+
+
+**Regions (website editions).** `app/regions.py` is a second closed list: Global, Asia, Europe, Americas, Middle East, Africa. The drafting step must pick exactly one per story (enforced by the output schema), and the exporter writes it as `region`. Drafts that predate regions export as `Global`, which shows in every edition, so no old story is hidden; an invalid region blocks the export. The web project's `src/core/regions.ts` must mirror this list.
+
 - Logging never prints the Telegram bot token (httpx URL logging is forced to WARNING).
 
 ## Website images and file names

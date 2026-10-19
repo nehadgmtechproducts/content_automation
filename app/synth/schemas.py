@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Literal
 
 from app.categories import CategoryName
+from app.regions import RegionName
 from pydantic import BaseModel, Field
 
 
@@ -87,6 +88,14 @@ class MetadataOut(BaseModel):
     hashtags: list[str] = Field(description="Platform-ready, with the leading #.")
     thumbnail_text: str = Field(description="<= 5 words for the video thumbnail.")
     music_mood: str
+    story_label: str = Field(
+        description="A short NAME for the ongoing story this article belongs to, 2-6 words, "
+                    "noun-phrase style, not a sentence: 'OpenAI real-time voice model', "
+                    "'Quebec election', 'Nvidia agent safety platform'. Later articles about the "
+                    "same subject will share it, so name the subject, not today's development.")
+    region: RegionName = Field(
+        description="Exactly one edition: Global, Asia, Europe, Americas, Middle East or Africa. "
+                    "Global unless the story is clearly about, or mainly affects, one region.")
     category: CategoryName = Field(
         description="Exactly one category: Technology, Politics, Finance, Entertainment "
                     "or Launches. A product launch is Launches even if it is a gadget; "

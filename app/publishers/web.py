@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.categories import NAMES, normalize_category
+from app.regions import DEFAULT_REGION, NAMES as REGION_NAMES, normalize_region
 from app.models import TopicStatus
 
 SCHEMA_VERSION = 1
@@ -38,9 +39,11 @@ class MediaFacts:
     cover_height: int
     social_width: int
     social_height: int
-    video_width: int
-    video_height: int
-    video_seconds: float
+    # Zero when the story has no video (articles-only mode).
+    video_width: int = 0
+    video_height: int = 0
+    video_seconds: float = 0.0
+    cover_credit: str = ""      # e.g. "Illustration generated with AI"; empty = no credit line
 
 
 @dataclass
@@ -48,8 +51,8 @@ class MediaPaths:
     """Public URL paths of the published files, e.g. "/media/<slug>/cover-3fa91c2b.jpg"."""
     cover: str
     social: str
-    poster: str
-    video: str
+    poster: str = ""    # empty when the story has no video
+    video: str = ""
 
 
 # Filenames carry a short content hash. Next.js caches resized images by URL, and browsers/CDNs
@@ -113,6 +116,29 @@ def split_category(raw: str) -> tuple[str, list[str]]:
     return category, extras
 
 
+def resolve_region(raw: str | None) -> str:
+    """The story's edition. Drafts written before regions existed have none: they default to
+    Global, which appears in EVERY edition, so an old story is never hidden. A region that is
+    present but not in the list blocks the export, like an unknown category does."""
+    if raw is None or not str(raw).strip():
+        return DEFAULT_REGION
+    region = normalize_region(raw)
+    if region is None:
+        raise ExportError(
+            f"region {raw!r} is not in the list ({', '.join(REGION_NAMES)}). "
+            f"Fix the draft's region and re-export.")
+    return region
+
+
+def story_of(article: dict, meta: dict) -> dict:
+    """{key, label}: the ongoing story this article is an update of. Drafts written before
+    stories existed form a story of their own (their slug), so nothing is ever ungrouped."""
+    from app.stories import fallback_story
+
+    default_key, default_label = fallback_story(article, meta)
+    return {"key": meta.get("story_key") or default_key, "label": meta.get("story_label") or default_label}
+
+
 def trim_description(text: str, limit: int = META_DESCRIPTION_MAX) -> str:
     """Cut at the last sentence end, else last word, under `limit` — never mid-word."""
     text = re.sub(r"\s+", " ", text).strip()
@@ -140,6 +166,8 @@ def build_web_article(*, topic_id: int, entity: str, article: dict, meta: dict,
         "dek": article["dek"],
         "metaDescription": trim_description(article["meta_description"]),
         "category": category,
+        "region": resolve_region(meta.get("region")),
+        "story": story_of(article, meta),
         "entity": entity,
         "publishedAt": _iso(published_at),
         "updatedAt": _iso(published_at),
@@ -147,7 +175,9 @@ def build_web_article(*, topic_id: int, entity: str, article: dict, meta: dict,
         "heroImage": {
             "src": paths.cover,
             "width": media.cover_width, "height": media.cover_height,
-            "alt": f"Abstract cover image for the story: {article['title']}",
+            "alt": (f"AI-generated illustration for the story: {article['title']}"
+                    if media.cover_credit else f"Abstract cover image for the story: {article['title']}"),
+            **({"credit": media.cover_credit} if media.cover_credit else {}),
         },
         # Titled card: used only for link previews (Open Graph / Twitter).
         "socialImage": {
@@ -155,12 +185,13 @@ def build_web_article(*, topic_id: int, entity: str, article: dict, meta: dict,
             "width": media.social_width, "height": media.social_height,
             "alt": f"Story card: {article['title']}",
         },
-        "video": {
+        # `video` is absent for articles-only stories (the contract makes it optional).
+        **({"video": {
             "src": paths.video,
             "poster": paths.poster,
             "width": media.video_width, "height": media.video_height,
             "durationSeconds": round(media.video_seconds, 2),
-        },
+        }} if paths.video else {}),
         "sections": [{"heading": s["heading"], "body": s["body_markdown"]}
                      for s in article["sections"]],
         "keyTakeaways": article["key_takeaways"],
@@ -201,10 +232,16 @@ def export_topic(topic_id: int, web_dir: Path, media_root: Path,
     src = media_root / str(topic_id)
     # (stem, source file). The cover is optional: stories rendered before it existed get one
     # generated from their entity, exactly as the asset pipeline would have.
-    required = {"social": src / "hero.jpg", "poster": src / "hero_vertical.jpg", "video": src / "final.mp4"}
+    # Images are always required. The video pair is optional: articles-only topics (the default
+    # now) have none, and topics rendered earlier keep theirs.
+    required = {"social": src / "hero.jpg"}
     missing = [str(p) for p in required.values() if not p.exists()]
     if missing:
         raise ExportError(f"missing rendered assets for topic {topic_id}: {', '.join(missing)}")
+    video_files = {"poster": src / "hero_vertical.jpg", "video": src / "final.mp4"}
+    has_video = all(p.exists() for p in video_files.values())
+    if has_video:
+        required.update(video_files)
 
     with session_scope() as s:
         topic = s.get(Topic, topic_id)
@@ -236,16 +273,22 @@ def export_topic(topic_id: int, web_dir: Path, media_root: Path,
     names = {stem: publish_asset(path, dest, stem) for stem, path in
              {"cover": cover_src, **required}.items()}
 
+    from app.assets.pipeline import COVER_SOURCE_FILE
+    from app.providers.image_nvidia import CREDIT
+    source_file = src / COVER_SOURCE_FILE
+    ai_cover = source_file.exists() and source_file.read_text(encoding="utf-8").strip() == "ai"
+
     cw, ch = _image_size(dest / names["cover"])
     sw, sh = _image_size(dest / names["social"])
-    vw, vh, secs = _probe_video(dest / names["video"])
+    vw, vh, secs = _probe_video(dest / names["video"]) if has_video else (0, 0, 0.0)
     base = f"/media/{slug}"
     doc = build_web_article(
         topic_id=topic_id, entity=entity, article=article, meta=meta, sources=sources,
         published_at=published_at,
-        media=MediaFacts(cw, ch, sw, sh, vw, vh, secs),
+        media=MediaFacts(cw, ch, sw, sh, vw, vh, secs, cover_credit=CREDIT if ai_cover else ""),
         paths=MediaPaths(cover=f"{base}/{names['cover']}", social=f"{base}/{names['social']}",
-                         poster=f"{base}/{names['poster']}", video=f"{base}/{names['video']}"),
+                         poster=f"{base}/{names['poster']}" if has_video else "",
+                         video=f"{base}/{names['video']}" if has_video else ""),
     )
     out = web_dir / "content" / "articles" / f"{slug}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -253,7 +296,7 @@ def export_topic(topic_id: int, web_dir: Path, media_root: Path,
     # Only now, with the new JSON in place, remove the superseded files.
     pruned = prune_assets(dest, keep=set(names.values()))
     return {"topic_id": topic_id, "slug": slug, "json": str(out), "sources": len(sources),
-            "video": f"{vw}x{vh} {secs:.1f}s", "cover": names["cover"], "pruned": pruned}
+            "video": f"{vw}x{vh} {secs:.1f}s" if has_video else None, "cover": names["cover"], "pruned": pruned}
 
 
 def publish_topic(topic_id: int) -> dict:

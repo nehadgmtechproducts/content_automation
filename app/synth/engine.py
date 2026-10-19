@@ -19,6 +19,7 @@ import anthropic
 from app.settings import get_settings
 from app.synth.schemas import DraftOut, FactSheetOut
 from app.categories import prompt_listing
+from app.regions import prompt_listing as region_listing
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,16 @@ intelligent but time-poor. You write from a supplied fact sheet and nothing else
 
 Choose exactly ONE category for the story:
 """ + prompt_listing() + """
+
+Give the story a short story_label: the NAME of the ongoing subject (2-6 words, a noun \
+phrase such as "OpenAI real-time voice model" or "Quebec election"), not a headline and not \
+today's development. Follow-up reports on the same subject will share this label.
+
+Choose exactly ONE region (the website edition the story belongs to):
+""" + region_listing() + """
+Pick Global unless the story is clearly about, or mainly affects, one region. A product or \
+AI model released by a global company is Global even if the company is based in one country; \
+an election, protest, court ruling, match or local market is the region where it happens.
 
 Category rules (apply the rules of the category you chose, in addition to the hard rules):
 - Politics: attribute every claim to a named person, body or outlet. State what happened \

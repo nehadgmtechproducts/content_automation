@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from app.assets.align import align
 from app.assets.render import Segment, beat_spans, plan_segments, probe, render
 from app.assets.subtitles import write_ass
 from app.providers.base import BrollRequest, ImageRequest, VoiceRequest, load_providers
+from app.providers.image_nvidia import build_prompt, generate_art, generic_prompt
 from app.providers.image_pillow import generate_cover
 from app.settings import get_settings
 from app.assets.safety import footage_context, safe_shot
@@ -19,15 +21,17 @@ from app.categories import normalize_category
 
 log = logging.getLogger(__name__)
 
+COVER_SOURCE_FILE = "cover.source"   # "ai" | "gradient" — read by the web exporter
+
 
 @dataclass
 class AssetResult:
     directory: Path
     hero_image: Path
-    hero_vertical: Path
-    voiceover: Path
-    subtitles: Path
-    video: Path
+    hero_vertical: Path | None   # None in articles-only mode (it is the video's opening card)
+    voiceover: Path | None
+    subtitles: Path | None
+    video: Path | None
     duration: float
     providers_used: dict
     cover_image: Path | None = None   # text-free website cover (see generate_cover)
@@ -78,6 +82,24 @@ def narration_text(script: dict) -> str:
     return " ".join(b.get("narration", "").strip() for b in script.get("beats", [])).strip()
 
 
+def _write_articles_only_package(topic_id: int, out_dir: Path, article: dict, script: dict,
+                                 metadata: dict, hero: Path, cover: Path,
+                                 providers_used: dict, art: Path | None = None) -> AssetResult:
+    """Articles-only finish: no voiceover, subtitles, b-roll or MP4 — images only."""
+    package = {
+        "topic_id": topic_id, "article": article, "script": script, "metadata": metadata,
+        "assets": {"hero": hero.name, "cover": cover.name, "art": art.name if art else None},
+        "providers_used": providers_used,
+    }
+    (out_dir / "package.json").write_text(json.dumps(package, indent=2), encoding="utf-8")
+    log.info("topic %s: articles-only assets (video generation is off)", topic_id)
+    return AssetResult(
+        directory=out_dir, hero_image=hero, hero_vertical=None, voiceover=None,
+        subtitles=None, video=None, duration=0.0, providers_used=providers_used,
+        cover_image=cover,
+    )
+
+
 def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
                    entity: str = "", music: Path | None = None) -> AssetResult:
     settings = get_settings()
@@ -88,11 +110,31 @@ def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
     headline = article.get("title") or "Untitled"
     dek = article.get("dek", "")
 
-    # --- hero images: 16:9 for the blog, 9:16 as the video's opening card ---
+    # --- story illustration: one AI picture per story (falls back to None, never raises) ---
+    art = generate_art(build_prompt(metadata.get("category"), headline, entity, script),
+                       out_dir / "art.jpg", fallback_prompt=generic_prompt(metadata.get("category")))
+
+    # --- hero image: the titled 16:9 card (link previews + Telegram), over the picture if we have one ---
     hero = providers.image.generate(
-        ImageRequest(headline=headline, subtitle=dek, entity=entity, width=1200, height=675),
+        ImageRequest(headline=headline, subtitle=dek, entity=entity, width=1200, height=675,
+                     background=str(art) if art else ""),
         out_dir / "hero.jpg",
     )
+
+    # --- website cover: text-free, the website draws the headline over it. The AI picture when we
+    # have one; otherwise the deterministic gradient from the local renderer. The source is written
+    # next to it so the exporter can credit an AI picture honestly. ---
+    if art:
+        cover = out_dir / "cover.jpg"
+        shutil.copyfile(art, cover)
+    else:
+        cover = generate_cover(entity or headline, out_dir / "cover.jpg")
+    (out_dir / COVER_SOURCE_FILE).write_text("ai" if art else "gradient", encoding="utf-8")
+
+    if not settings.generate_video:
+        return _write_articles_only_package(
+            topic_id, out_dir, article, script, metadata, hero, cover, providers.used, art)
+
     hero_vertical = providers.image.generate(
         ImageRequest(
             headline=metadata.get("thumbnail_text") or headline,
@@ -100,11 +142,6 @@ def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
         ),
         out_dir / "hero_vertical.jpg",
     )
-
-    # --- website cover: same palette, no text. Always the local Pillow renderer, even when a
-    # paid image provider is configured: it is a styling element, not generated art, and it must
-    # stay deterministic and free of invented imagery. ---
-    cover = generate_cover(entity or headline, out_dir / "cover.jpg")
 
     # --- voiceover, paced to the script's target length ---
     narration = narration_text(script)

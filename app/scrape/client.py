@@ -124,7 +124,19 @@ _SCRAPERS = {"firecrawl": scrape_firecrawl, "trafilatura": scrape_trafilatura}
 
 
 def scrape(url: str) -> ScrapeResult | None:
-    """Run the configured scraper, falling back down the chain on failure."""
+    """Run the configured scraper, falling back down the chain on failure.
+
+    A Google News redirect link is first resolved to the publisher's real URL; the returned
+    result carries that real URL so the source list links to the outlet, not to Google."""
+    from app.scrape import gnews
+
+    if gnews.is_google_news_url(url):
+        real = gnews.resolve(url)
+        if real is None:
+            log.warning("could not resolve google news link %s", url[:80])
+            return None
+        log.info("google news link resolved to %s", real)
+        url = real
     cfg = providers_config()["scrape"]
     order = [cfg.get("active", "firecrawl")]
     fallback = cfg.get("fallback")

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # fal.ai — one key for both Stage 3 scripting (OpenAI-compatible LLM router) and
     # Stage 4 video (Gemini Omni). Read from the FAL_KEY env var.
     fal_key: str = ""
+    # NVIDIA hosted API (build.nvidia.com): an `nvapi-...` key. Used when SYNTHESIS_PROVIDER=nvidia.
+    nvidia_api_key: str = ""
     firecrawl_api_key: str = ""
     pexels_api_key: str = ""
     elevenlabs_api_key: str = ""
@@ -38,11 +40,16 @@ class Settings(BaseSettings):
     # Which provider Stage 3 actually calls. "anthropic" needs anthropic_api_key +
     # synthesis_model; "openai" needs openai_api_key + openai_model. Switching is a
     # config change only — app/pipeline.py branches on this, nothing else does.
-    # "anthropic" | "openai" | "fal" — app/pipeline.py branches on this.
+    # "anthropic" | "openai" | "fal" | "nvidia" — app/pipeline.py branches on this.
     synthesis_provider: str = "fal"
     synthesis_model: str = "claude-opus-5"
     openai_model: str = "gpt-4o"
     fal_llm_model: str = "openai/gpt-6.1-sol"
+    nvidia_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
+    nvidia_thinking: bool = False
+    # AI-generated cover illustration (FLUX on NVIDIA's API); falls back to the gradient on failure.
+    ai_images: bool = True
+    nvidia_image_model: str = "black-forest-labs/flux.2-klein-4b"
 
     # --- stage 5: Telegram approval (optional — blank means "not configured") ---
     telegram_bot_token: str = ""
@@ -57,6 +64,9 @@ class Settings(BaseSettings):
     # The media directory is mounted at the SAME absolute path inside it, which means
     # no path rewriting and the generated command runs unchanged.
     render_in_docker: bool = False
+    # Articles-only mode: when False (the default) Stage 4 makes just the article's images
+    # (titled hero card + text-free cover) — no voiceover, subtitles, b-roll or MP4.
+    generate_video: bool = False
     render_docker_image: str = "content-engine-ffmpeg"
 
     @property

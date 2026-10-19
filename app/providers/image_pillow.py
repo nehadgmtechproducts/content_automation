@@ -53,6 +53,33 @@ def _fit_text(draw, text, font_path, max_width, start_size, min_size, max_lines)
     return font, textwrap.wrap(text, width=28)[:max_lines]
 
 
+def _fit(image: Image.Image, w: int, h: int) -> Image.Image:
+    scale = max(w / image.width, h / image.height)
+    image = image.resize((round(image.width * scale), round(image.height * scale)), Image.LANCZOS)
+    left, top = (image.width - w) // 2, (image.height - h) // 2
+    return image.crop((left, top, left + w, top + h))
+
+
+def _darken_for_text(image: Image.Image) -> Image.Image:
+    """Dim the picture, more on the left and bottom where the title sits, so white text stays readable."""
+    w, h = image.size
+    shade = Image.new("L", (w, h))
+    px = shade.load()
+    for x in range(w):
+        left = int(205 * max(0.0, 1 - x / (w * 0.85)))
+        for y in range(h):
+            px[x, y] = min(235, 70 + left + int(60 * y / h))
+    return Image.composite(Image.new("RGB", (w, h), (8, 8, 14)), image, shade)
+
+
+def subtitle_lines(text: str, width: int = 64, max_lines: int = 2) -> list[str]:
+    """Wrap the subtitle; a longer one ends in an ellipsis instead of stopping mid-sentence."""
+    lines = textwrap.wrap(text, width=width)
+    if len(lines) <= max_lines:
+        return lines
+    return lines[:max_lines - 1] + [textwrap.shorten(" ".join(lines[max_lines - 1:]), width=width, placeholder="…")]
+
+
 class PillowEditorialCard(ImageProvider):
     name = "pillow_card"
 
@@ -60,15 +87,18 @@ class PillowEditorialCard(ImageProvider):
         w, h = req.width, req.height
         dark, light, accent = _palette(req.entity or req.headline)
 
-        img = _gradient((w, h), light, dark)
+        if req.background and Path(req.background).exists():
+            img = _darken_for_text(_fit(Image.open(req.background).convert("RGB"), w, h))
+        else:
+            img = _gradient((w, h), light, dark)
 
-        # Soft radial bloom for depth — cheap, and stops the flat-gradient look.
-        bloom = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(bloom).ellipse(
-            [int(w * 0.45), int(-h * 0.35), int(w * 1.35), int(h * 0.75)], fill=110
-        )
-        bloom = bloom.filter(ImageFilter.GaussianBlur(int(min(w, h) * 0.12)))
-        img = Image.composite(Image.new("RGB", (w, h), accent), img, bloom)
+            # Soft radial bloom for depth — cheap, and stops the flat-gradient look.
+            bloom = Image.new("L", (w, h), 0)
+            ImageDraw.Draw(bloom).ellipse(
+                [int(w * 0.45), int(-h * 0.35), int(w * 1.35), int(h * 0.75)], fill=110
+            )
+            bloom = bloom.filter(ImageFilter.GaussianBlur(int(min(w, h) * 0.12)))
+            img = Image.composite(Image.new("RGB", (w, h), accent), img, bloom)
 
         draw = ImageDraw.Draw(img)
         margin = int(w * 0.07)
@@ -93,7 +123,7 @@ class PillowEditorialCard(ImageProvider):
 
         if req.subtitle:
             sub_font = ImageFont.truetype(regular_font(), max(14, int(h * 0.032)))
-            sub_lines = textwrap.wrap(req.subtitle, width=64)[:2]
+            sub_lines = subtitle_lines(req.subtitle)
             y += int(h * 0.02)
             for line in sub_lines:
                 draw.text((margin, y), line, font=sub_font, fill=(232, 232, 236))

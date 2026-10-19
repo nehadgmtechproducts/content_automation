@@ -70,3 +70,13 @@ def test_prune_removes_superseded_and_legacy_names_but_nothing_else(tmp_path):
     removed = prune_assets(tmp_path, keep={"cover-22222222.jpg", "video-33333333.mp4"})
     assert removed == ["cover-11111111.jpg", "cover.jpg"]
     assert sorted(p.name for p in tmp_path.iterdir()) == ["cover-22222222.jpg", "notes.txt", "other.jpg", "video-33333333.mp4"]
+
+
+def test_a_long_subtitle_is_cut_with_an_ellipsis_not_mid_sentence():
+    from app.providers.image_pillow import subtitle_lines
+
+    dek = ("The billionaire's announcement follows Anthropic's Public Benefit Fund pledge and could "
+           "distribute over $10 billion in SpaceX stock to roughly 73 million children.")
+    lines = subtitle_lines(dek)
+    assert len(lines) == 2 and lines[-1].endswith("…") and all(len(x) <= 64 for x in lines)
+    assert subtitle_lines("Short dek.") == ["Short dek."]

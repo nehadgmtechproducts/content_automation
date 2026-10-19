@@ -6,6 +6,8 @@ Slack adapter is ever added alongside Telegram (same split as app/providers/).
 """
 from __future__ import annotations
 
+import re
+
 from app.approval.telegram_client import MAX_CAPTION_CHARS, MAX_MESSAGE_CHARS, trim
 from app.models import TopicStatus
 
@@ -25,6 +27,66 @@ def build_video_caption(article: dict, entity: str = "") -> str:
     title = article.get("title", "Untitled")
     label = f" — {entity}" if entity else ""
     return trim(f"\U0001f3ac 45-second video draft{label}\n{title}", MAX_CAPTION_CHARS)
+
+
+def _plain(markdown: str) -> str:
+    """Telegram messages are sent as plain text, so drop the markdown markers the article
+    body carries: **bold**/_italic_ markers go, [text](url) becomes 'text (url)'."""
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r"\1 (\2)", markdown)
+    text = re.sub(r"(\*\*|__)(.+?)\1", r"\2", text)
+    text = re.sub(r"(?<![\w*])[*_]([^*_\n]+)[*_](?![\w*])", r"\1", text)
+    return text.strip()
+
+
+def build_article_messages(article: dict, sources: list[dict] | None = None,
+                           limit: int = MAX_MESSAGE_CHARS) -> list[str]:
+    """The full article as plain-text messages of at most `limit` characters each.
+
+    Without video there is nothing else to review, so the human approver reads the actual
+    article in Telegram before pressing Approve. Splits on paragraph boundaries (a single
+    over-long paragraph is cut at a space), never mid-word, and never drops text.
+    """
+    blocks: list[str] = [f"\U0001f4c4 {article.get('title', 'Untitled')}"]
+    if article.get("dek"):
+        blocks.append(article["dek"])
+    for section in article.get("sections", []):
+        blocks.append(f"\u25b8 {section.get('heading', '')}".rstrip())
+        blocks.extend(_plain(part) for part in section.get("body_markdown", "").split("\n\n") if part.strip())
+    if article.get("key_takeaways"):
+        blocks.append("Key takeaways\n" + "\n".join(f"\u2022 {_plain(k)}" for k in article["key_takeaways"]))
+    if article.get("why_it_matters"):
+        blocks.append("Why it matters\n" + _plain(article["why_it_matters"]))
+    if sources:
+        blocks.append("Sources\n" + "\n".join(
+            f"[{s.get('index', i + 1)}] {s.get('title', '')} \u2014 {s.get('url', '')}"
+            for i, s in enumerate(sources)))
+
+    messages: list[str] = []
+    current = ""
+    for block in blocks:
+        while len(block) > limit:
+            cut = block.rfind(" ", 0, limit)
+            cut = cut if cut > 0 else limit
+            piece, block = block[:cut].rstrip(), block[cut:].lstrip()
+            if current:
+                messages.append(current)
+                current = ""
+            messages.append(piece)
+        joined = f"{current}\n\n{block}" if current else block
+        if len(joined) <= limit:
+            current = joined
+        else:
+            messages.append(current)
+            current = block
+    if current:
+        messages.append(current)
+    return messages
+
+
+def build_review_caption(article: dict) -> str:
+    """Caption on the hero photo in articles-only mode — the message the buttons attach to."""
+    title = article.get("title", "Untitled")
+    return trim(f"\U0001f4f0 Article draft \u2014 read above, then decide\n{title}", MAX_CAPTION_CHARS)
 
 
 def build_metadata_text(metadata: dict, keyword_limit: int = 6) -> str:

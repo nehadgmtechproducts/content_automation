@@ -18,6 +18,10 @@ x-app-env: &app-env
   SYNTHESIS_PROVIDER: ${SYNTHESIS_PROVIDER:-fal}
   FAL_KEY: ${FAL_KEY:-}
   FAL_LLM_MODEL: ${FAL_LLM_MODEL:-openai/gpt-6.1-sol}
+  NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+  NVIDIA_MODEL: ${NVIDIA_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}
+  AI_IMAGES: ${AI_IMAGES:-true}                # AI cover illustration; gradient fallback on failure
+  NVIDIA_IMAGE_MODEL: ${NVIDIA_IMAGE_MODEL:-black-forest-labs/flux.2-klein-4b}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
@@ -27,6 +31,7 @@ x-app-env: &app-env
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
   TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
   MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-14}
+  GENERATE_VIDEO: ${GENERATE_VIDEO:-false}   # false = articles + images only (no voice/b-roll/MP4)
 
 x-app: &app
   build: { context: ., dockerfile: docker/render.Dockerfile }

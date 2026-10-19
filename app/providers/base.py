@@ -18,6 +18,7 @@ class ImageRequest:
     prompt: str = ""
     width: int = 1200
     height: int = 675
+    background: str = ""   # optional picture to put the title over (path)
 
 
 @dataclass

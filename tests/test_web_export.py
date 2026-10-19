@@ -103,3 +103,15 @@ def test_new_categories_export_as_themselves():
 def test_unknown_category_blocks_the_export_instead_of_inventing_a_heading():
     with pytest.raises(ExportError, match="taxonomy"):
         build(meta={**META, "category": "Knitting"})
+
+
+def test_region_is_exported_and_old_drafts_default_to_global():
+    assert build(meta={**META, "region": "Asia"})["region"] == "Asia"
+    assert build()["region"] == "Global"          # META has no region (a pre-regions draft)
+
+
+def test_story_is_exported_and_old_drafts_form_a_story_of_their_own():
+    own = build()["story"]
+    assert own == {"key": "apple-full-disk-access", "label": "Apple Tightens Disk Access"}   # slug + title fallback
+    grouped = build(meta={**META, "story_key": "voice", "story_label": "OpenAI voice model"})["story"]
+    assert grouped == {"key": "voice", "label": "OpenAI voice model"}

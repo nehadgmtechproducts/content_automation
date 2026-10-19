@@ -235,11 +235,11 @@ def run_all(
     )
     console.print_json(data={
         "directory": str(result.directory),
-        "video": str(result.video),
+        "video": str(result.video) if result.video else None,
         "duration_seconds": round(result.duration, 2),
         "providers_used": result.providers_used,
     })
-    console.print(f"\n[green]open it:[/green] open {result.video}")
+    console.print(f"\n[green]open it:[/green] open {result.video or result.hero_image}")
 
 
 @app.command()

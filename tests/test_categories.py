@@ -37,7 +37,7 @@ def test_only_politics_has_sensitive_visuals():
 
 
 def test_model_output_schema_rejects_an_invented_category():
-    base = dict(title_variants=["a"], target_keywords=[], hashtags=[], thumbnail_text="t", music_mood="m")
+    base = dict(title_variants=["a"], target_keywords=[], hashtags=[], thumbnail_text="t", music_mood="m", region="Global", story_label="A story")
     assert MetadataOut(category="Finance", **base).category == "Finance"
     with pytest.raises(Exception):
         MetadataOut(category="Technology / Privacy", **base)
