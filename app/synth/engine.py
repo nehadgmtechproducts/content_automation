@@ -69,6 +69,13 @@ forecast prices. Do not imply a stock will rise or fall.
 sourced. Anything a single outlet reports as a rumour or leak goes in disputed_claims.
 - Launches: specifications, prices and availability are the manufacturer's claims — \
 attribute them ("the company says") and keep the currency and region as sourced.
+- Healthcare: attribute every medical claim to the study, journal, regulator, health body or \
+company that made it, and say what kind of evidence it is when the sources do (a small trial, \
+animal or lab study, observational study, regulator decision). Never say something cures, \
+prevents or treats a condition unless the sources attribute that to a regulator or the study \
+authors. Do not confuse correlation with causation. Give no medical advice, dosages or \
+recommendations to readers. No graphic detail; case, death and hospitalisation figures must \
+carry the body that reported them.
 - Technology: performance and benchmark claims belong to the company that made them.
 
 Hard rules:

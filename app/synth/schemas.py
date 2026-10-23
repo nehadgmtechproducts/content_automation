@@ -97,9 +97,10 @@ class MetadataOut(BaseModel):
         description="Exactly one edition: Global, Asia, Europe, Americas, Middle East or Africa. "
                     "Global unless the story is clearly about, or mainly affects, one region.")
     category: CategoryName = Field(
-        description="Exactly one category: Technology, Politics, Finance, Entertainment "
-                    "or Launches. A product launch is Launches even if it is a gadget; "
-                    "sports belong to Entertainment.")
+        description="Exactly one category: Technology, Politics, Finance, Entertainment, "
+                    "Launches or Healthcare. A product launch is Launches even if it is a gadget; "
+                    "sports belong to Entertainment; medicine, drugs, outbreaks and health policy "
+                    "belong to Healthcare.")
 
 
 class DraftOut(BaseModel):

@@ -54,6 +54,7 @@ _GENERIC_SCENES = {
     "Finance": "blurred trading screens with rising line charts in a dim financial office",
     "Entertainment": "an empty theatre stage with warm spotlights and red velvet seats",
     "Launches": "a sleek product on a minimalist studio pedestal with dramatic soft lighting",
+    "Healthcare": "a bright modern laboratory bench with a microscope and glassware, soft light, no people",
 }
 _DEFAULT_SCENE = "an abstract modern newsroom with glowing screens and soft light"
 

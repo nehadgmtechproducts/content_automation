@@ -24,6 +24,9 @@ class Category:
     covers: str                       # shown to the model so it can classify
     synonyms: tuple[str, ...] = ()    # legacy / near-miss labels that normalize to this one
     sensitive_visuals: bool = False   # True -> no photoreal generated footage (see safety.py)
+    # People-free replacement shots for a sensitive category's risky shot descriptions. Empty means
+    # "use the default (political) set" — see app/assets/safety.py.
+    symbolic_shots: tuple[str, ...] = ()
 
 
 CATEGORIES: tuple[Category, ...] = (
@@ -63,10 +66,27 @@ CATEGORIES: tuple[Category, ...] = (
         ("new launches", "launch", "product launches", "cars", "automotive", "auto", "bikes",
          "motorcycles", "gadgets", "devices", "mobile", "smartphones", "ev", "evs"),
     ),
+    Category(
+        "Healthcare", "healthcare",
+        "Medicine and public health: diseases and outbreaks, drugs and vaccines, medical "
+        "research and clinical trials, regulators (FDA, WHO, NHS), hospitals and health "
+        "systems, health insurance and policy, mental health, nutrition and fitness studies.",
+        ("health", "health care", "medical", "medicine", "public health", "pharma",
+         "pharmaceutical", "pharmaceuticals", "biotech", "biotechnology", "wellness", "vaccine",
+         "vaccines", "disease", "diseases", "outbreak", "hospital", "hospitals", "nutrition",
+         "fitness", "mental health", "clinical trial", "clinical trials", "drug", "drugs"),
+        sensitive_visuals=True,
+        symbolic_shots=(
+            "Slow push-in on a stethoscope resting on a clean white desk, shallow depth of field",
+            "Close-up of laboratory glassware and a microscope in soft window light, camera glides sideways",
+            "Slow orbit around a translucent DNA double-helix model on a lab bench, cool side lighting",
+            "Bright hospital corridor with a polished floor and soft ceiling lights, slow dolly forward",
+        ),
+    ),
 )
 
 NAMES: tuple[str, ...] = tuple(c.name for c in CATEGORIES)
-CategoryName = Literal["Technology", "Politics", "Finance", "Entertainment", "Launches"]
+CategoryName = Literal["Technology", "Politics", "Finance", "Entertainment", "Launches", "Healthcare"]
 
 _BY_KEY: dict[str, Category] = {}
 for _c in CATEGORIES:

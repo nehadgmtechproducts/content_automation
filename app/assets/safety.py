@@ -24,7 +24,11 @@ _RISKY = re.compile(
     r"flag|flags|weapon|weapons|gun|guns|rifle|missile|missiles|bomb|bombs|explosion|"
     r"blast|tank|tanks|drone strike|fighter jet|warplane|"
     r"blood|injur\w*|wounded|casualt\w*|corpse|dead|victim|victims|refugee|refugees|"
-    r"face|faces|portrait|person|people|man|woman|men|women|child|children)\b",
+    r"face|faces|portrait|person|people|man|woman|men|women|child|children|"
+    # medicine: patients and bodies are as hazardous to fake as crowds and soldiers
+    r"patient|patients|doctor|doctors|nurse|nurses|surgeon|surgeons|surgery|syringe|syringes|"
+    r"needle|needles|injection|tumou?rs?|wound|wounds|bodies|body|baby|babies|pregnan\w*|"
+    r"sick|ill|illness|infected)\b",
     re.IGNORECASE,
 )
 
@@ -44,9 +48,11 @@ def is_risky_shot(category: str | None, query: str) -> bool:
 
 
 def safe_shot(category: str | None, query: str) -> tuple[str, bool]:
-    """Return (shot, was_replaced). Safe or non-sensitive queries come back unchanged."""
+    """Return (shot, was_replaced). Safe or non-sensitive queries come back unchanged.
+    The replacement fits the category: a gavel for politics, a stethoscope or lab bench for health."""
     if is_risky_shot(category, query):
-        return _SYMBOLIC[next(_rotation) % len(_SYMBOLIC)], True
+        shots = get_category(category or "").symbolic_shots or _SYMBOLIC
+        return shots[next(_rotation) % len(shots)], True
     return query, False
 
 

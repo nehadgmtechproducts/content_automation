@@ -1,5 +1,5 @@
 # Multi-category source list: Technology, Politics, Finance, Entertainment (incl. sports),
-# Launches (cars, bikes, phones, gadgets). Categories are decided later by the drafting
+# Launches (cars, bikes, phones, gadgets), Healthcare. Categories are decided later by the drafting
 # step from a fixed taxonomy (app/categories.py) — sources here are grouped by comment only.
 # tier 1 = original reporting  |  tier 2 = aggregator/secondary  |  tier 3 = social/community
 # A cluster needs >= 1 tier-1 source before it can fire (see detect/velocity.py).
@@ -66,6 +66,14 @@ sources:
   - {id: engadget, type: rss, tier: 1, url: "https://www.engadget.com/rss.xml"}
   - {id: gsmarena, type: rss, tier: 1, url: "https://www.gsmarena.com/rss-news-reviews.php3"}
   - {id: electrek, type: rss, tier: 1, url: "https://electrek.co/feed/"}
+  # ---- healthcare: medicine, public health, drugs, outbreaks ----
+  - {id: bbc_health, type: rss, tier: 1, url: "https://feeds.bbci.co.uk/news/health/rss.xml"}
+  - {id: guardian_health, type: rss, tier: 1, url: "https://www.theguardian.com/society/health/rss"}
+  - {id: npr_health, type: rss, tier: 1, url: "https://feeds.npr.org/1128/rss.xml"}
+  - {id: statnews, type: rss, tier: 1, url: "https://www.statnews.com/feed/"}
+  - {id: abc_health, type: rss, tier: 1, url: "https://abcnews.go.com/abcnews/healthheadlines"}
+  - {id: fda_press, type: rss, tier: 1, url: "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml"}
+  - {id: who_news, type: rss, tier: 1, url: "https://www.who.int/rss-feeds/news-english.xml"}
   # ---------------- tier 2: Google News topical queries ----------------
   # Google News republishes originals; ingest/normalize.py resolves each item back to
   # its true publisher domain so a cluster is not credited three times to news.google.com.
@@ -90,7 +98,7 @@ sources:
     tier: 2
     query: "AI regulation OR \"AI policy\" OR \"AI lawsuit\""
 
-  # ---- google news: politics / finance / entertainment / sports / launches ----
+  # ---- google news: politics / finance / entertainment / sports / launches / healthcare ----
   - {id: gnews_politics, type: google_news, tier: 2, query: "election OR parliament OR \"Supreme Court\" OR sanctions OR ceasefire"}
   - {id: gnews_world_conflict, type: google_news, tier: 2, query: "war OR conflict OR protests OR diplomacy"}
   - {id: gnews_markets, type: google_news, tier: 2, query: "stock market OR earnings OR \"interest rates\" OR inflation"}
@@ -100,6 +108,9 @@ sources:
   - {id: gnews_cars, type: google_news, tier: 2, query: "new car launch OR electric car unveiled OR SUV launched"}
   - {id: gnews_bikes, type: google_news, tier: 2, query: "new motorcycle launch OR bike unveiled OR scooter launched"}
   - {id: gnews_phones, type: google_news, tier: 2, query: "smartphone launch OR iPhone OR Galaxy OR Pixel unveiled"}
+  - {id: gnews_health_drugs, type: google_news, tier: 2, query: "FDA approval OR clinical trial OR vaccine OR \"drug approved\""}
+  - {id: gnews_health_outbreak, type: google_news, tier: 2, query: "outbreak OR epidemic OR \"public health\" OR \"World Health Organization\""}
+  - {id: gnews_health_systems, type: google_news, tier: 2, query: "hospital OR \"health insurance\" OR Medicare OR NHS"}
 
   # ---------------- tier 3: community signal ----------------
   # Reddit is polled over RSS (the .json API 403s non-browser clients). RSS carries no

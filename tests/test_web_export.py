@@ -98,6 +98,8 @@ def test_legacy_labels_normalize_to_the_taxonomy_in_the_export():
 
 def test_new_categories_export_as_themselves():
     assert build(meta={**META, "category": "Launches"})["category"] == "Launches"
+    assert build(meta={**META, "category": "Healthcare"})["category"] == "Healthcare"
+    assert build(meta={**META, "category": "Health"})["category"] == "Healthcare"     # near-miss label
 
 
 def test_unknown_category_blocks_the_export_instead_of_inventing_a_heading():

@@ -261,18 +261,27 @@ time (falling back to fetch time only when a feed gives none) is older than
 
 ## Categories (not just tech)
 
-The engine covers five categories, defined once in `app/categories.py`: **Technology,
-Politics, Finance, Entertainment** (including sports) and **Launches** (cars, bikes, phones,
-gadgets). Sources live in `config/feeds.yaml` (49 feeds). The drafting step must pick
+The engine covers six categories, defined once in `app/categories.py`: **Technology,
+Politics, Finance, Entertainment** (including sports), **Launches** (cars, bikes, phones,
+gadgets) and **Healthcare** (medicine, drugs and vaccines, outbreaks, research, health policy).
+Sources live in `config/feeds.yaml` (59 feeds, 10 of them healthcare). The drafting step must pick
 exactly one category (enforced by the output schema, so the model can't invent labels), and
 the exporter maps legacy labels onto the list or refuses to publish.
 
 - **Per-category editorial rules** are in the drafting prompt (`DRAFT_SYSTEM`): politics
   attributes every claim and never predicts or endorses; finance never gives advice or price
-  forecasts; launches attributes specs and prices to the manufacturer.
+  forecasts; launches attributes specs and prices to the manufacturer; healthcare attributes
+  every medical claim to the study, journal or regulator, says what kind of evidence it is,
+  never claims a cure or gives medical advice, and does not confuse correlation with causation.
 - **Visual safety (`app/assets/safety.py`).** Generated footage is photoreal, so for
-  Politics any shot showing people, soldiers, crowds, flags, weapons or violence is replaced
-  with a symbolic people-free one, and the headline is withheld from the footage prompt.
+  Politics **and Healthcare** any shot showing people, soldiers, crowds, flags, weapons,
+  violence, patients, doctors, injections or bodies is replaced with a symbolic people-free one
+  (a gavel for politics; a stethoscope or lab bench for healthcare), and the headline is
+  withheld from the footage prompt. The same shot description feeds the AI cover picture.
+- **Adding a category** means changing `app/categories.py` (name, slug, what it covers, synonyms,
+  visual-safety flag), the `CategoryName` literal beside it (a test checks they match), the
+  editorial rule in `app/synth/engine.py`, a fallback scene in `app/providers/image_nvidia.py`,
+  sources in `config/feeds.yaml`, and the website's `src/core/categories.ts` and colour.
   Prompt rules are a request; this is the code-level backstop.
 - **Cost cap.** `trigger.max_topics_per_day` (default 8, rolling 24h, counts manual topics
   too) stops a busy news day from auto-producing dozens of ~$1.50 videos. `detect --dry-run`
