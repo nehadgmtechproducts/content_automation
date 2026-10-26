@@ -14,6 +14,8 @@ from app.assets.render import Segment, beat_spans, plan_segments, probe, render
 from app.assets.subtitles import write_ass
 from app.providers.base import BrollRequest, ImageRequest, VoiceRequest, load_providers
 from app.providers.image_nvidia import build_prompt, generate_art, generic_prompt
+from app.providers.commons_photo import find_commons_photo
+from app.providers.source_photo import find_source_photo
 from app.providers.image_pillow import generate_cover
 from app.settings import get_settings
 from app.assets.safety import footage_context, safe_shot
@@ -21,7 +23,9 @@ from app.categories import normalize_category
 
 log = logging.getLogger(__name__)
 
-COVER_SOURCE_FILE = "cover.source"   # "ai" | "gradient" — read by the web exporter
+AI_LABEL = "AI-generated illustration"
+COVER_SOURCE_FILE = "cover.source"   # "source" | "commons" | "ai" | "gradient": read by the web exporter
+COVER_CREDIT_FILE = "cover.credit.json"   # the outlet and page a "source" picture came from
 
 
 @dataclass
@@ -84,11 +88,12 @@ def narration_text(script: dict) -> str:
 
 def _write_articles_only_package(topic_id: int, out_dir: Path, article: dict, script: dict,
                                  metadata: dict, hero: Path, cover: Path,
-                                 providers_used: dict, art: Path | None = None) -> AssetResult:
+                                 providers_used: dict, art: Path | None = None,
+                                 art_kind: str | None = None) -> AssetResult:
     """Articles-only finish: no voiceover, subtitles, b-roll or MP4 — images only."""
     package = {
         "topic_id": topic_id, "article": article, "script": script, "metadata": metadata,
-        "assets": {"hero": hero.name, "cover": cover.name, "art": art.name if art else None},
+        "assets": {"hero": hero.name, "cover": cover.name, "art": art.name if art else None, "art_kind": art_kind},
         "providers_used": providers_used,
     }
     (out_dir / "package.json").write_text(json.dumps(package, indent=2), encoding="utf-8")
@@ -101,7 +106,8 @@ def _write_articles_only_package(topic_id: int, out_dir: Path, article: dict, sc
 
 
 def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
-                   entity: str = "", music: Path | None = None) -> AssetResult:
+                   entity: str = "", music: Path | None = None,
+                   sources: list[dict] | None = None) -> AssetResult:
     settings = get_settings()
     out_dir = settings.media_path / str(topic_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -110,14 +116,37 @@ def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
     headline = article.get("title") or "Untitled"
     dek = article.get("dek", "")
 
-    # --- story illustration: one AI picture per story (falls back to None, never raises) ---
-    art = generate_art(build_prompt(metadata.get("category"), headline, entity, script),
-                       out_dir / "art.jpg", fallback_prompt=generic_prompt(metadata.get("category")))
+    # --- the story's picture. Order: a photo from one of its own sources (COVER_IMAGE_MODE=source), else an AI
+    # illustration, else nothing (the gradient). Neither step raises: a story is never held up by its picture. ---
+    art, art_kind, photo, commons = None, None, None, None
+    mode = getattr(settings, "cover_image_mode", "source")
+    if mode == "source":
+        if metadata.get("sensitive"):
+            # a photograph of a real child or survivor is what the law forbids us to show (see identity_guard.py)
+            log.info("topic %s is flagged sensitive: no real photograph at all", topic_id)
+        else:
+            if sources:
+                photo = find_source_photo(sources, out_dir / "photo.jpg")
+                if photo:
+                    art, art_kind = photo.path, "source"
+            if art is None:      # no safe photo from the sources: a licence-safe FILE photo of the story's subject
+                body = " ".join([dek, *[s.get("body_markdown", "") for s in article.get("sections", [])]])
+                commons = find_commons_photo(headline, body, metadata.get("target_keywords", []), entity, out_dir / "photo.jpg",
+                                             allow_sharealike=getattr(settings, "commons_allow_sharealike", False))
+                if commons:
+                    art, art_kind = commons.path, "commons"
+    if art is None and mode in ("source", "ai"):
+        art = generate_art(build_prompt(metadata.get("category"), headline, entity, script),
+                           out_dir / "art.jpg", fallback_prompt=generic_prompt(metadata.get("category")))
+        art_kind = "ai" if art else None
 
     # --- hero image: the titled 16:9 card (link previews + Telegram), over the picture if we have one ---
     hero = providers.image.generate(
         ImageRequest(headline=headline, subtitle=dek, entity=entity, width=1200, height=675,
-                     background=str(art) if art else ""),
+                     background=str(art) if art else "",
+                     # the card is shared in link previews and Telegram, away from the website's badge, so the
+                     # label is painted onto the picture itself
+                     label=photo.credit if photo else (commons.label if commons else (AI_LABEL if art else ""))),
         out_dir / "hero.jpg",
     )
 
@@ -129,11 +158,19 @@ def produce_assets(topic_id: int, article: dict, script: dict, metadata: dict,
         shutil.copyfile(art, cover)
     else:
         cover = generate_cover(entity or headline, out_dir / "cover.jpg")
-    (out_dir / COVER_SOURCE_FILE).write_text("ai" if art else "gradient", encoding="utf-8")
+    (out_dir / COVER_SOURCE_FILE).write_text(art_kind or "gradient", encoding="utf-8")
+    credit_file = out_dir / COVER_CREDIT_FILE
+    if photo:
+        credit_file.write_text(json.dumps({"credit": photo.credit, "outlet": photo.outlet, "url": photo.page_url}), encoding="utf-8")
+    elif commons:
+        credit_file.write_text(json.dumps({"credit": commons.credit, "outlet": "Wikimedia Commons", "url": commons.page_url,
+                                           "subject": commons.subject, "licence": commons.licence}), encoding="utf-8")
+    else:
+        credit_file.unlink(missing_ok=True)       # a re-run must not leave a stale credit behind
 
     if not settings.generate_video:
         return _write_articles_only_package(
-            topic_id, out_dir, article, script, metadata, hero, cover, providers.used, art)
+            topic_id, out_dir, article, script, metadata, hero, cover, providers.used, art, art_kind)
 
     hero_vertical = providers.image.generate(
         ImageRequest(

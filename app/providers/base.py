@@ -19,6 +19,7 @@ class ImageRequest:
     width: int = 1200
     height: int = 675
     background: str = ""   # optional picture to put the title over (path)
+    label: str = ""        # a small label drawn ON the picture, e.g. "AI-generated illustration"
 
 
 @dataclass

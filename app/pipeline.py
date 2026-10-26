@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.assets.pipeline import produce_assets
 from app.db import session_scope
 from app.detect.velocity import run_detection, top_articles_for_topic
-from app import production, stories
+from app import identity_guard, production, stories
 from app.freshness import check_freshness
 from app.ingest.fetch import ingest_once
 from app.models import (
@@ -161,6 +161,18 @@ def run_synthesis(topic_id: int) -> dict:
         _fail(topic_id, f"synthesis error: {exc}")
         return {"topic_id": topic_id, "ok": False, "error": str(exc)}
 
+    # Identity protection backstop (app/identity_guard.py): a story about a sexual offence or a child in a crime is
+    # flagged here, and the Telegram card then makes the reviewer confirm nobody is identifiable.
+    draft_meta = dict(draft.payload["metadata"])
+    try:
+        sensitive = identity_guard.assess(draft.payload, [d.markdown for d in docs])
+    except Exception as exc:  # noqa: BLE001 - the guard must never lose a story, but a failure must be loud
+        log.error("topic %s: identity guard failed (%s); flagging the story as sensitive to be safe", topic_id, exc)
+        sensitive = {"reasons": ["the automatic identity check failed"], "names": []}
+    if sensitive:
+        draft_meta["sensitive"] = sensitive
+        log.warning("topic %s flagged sensitive: %s", topic_id, "; ".join(sensitive["reasons"]))
+
     with session_scope() as s:
         s.query(FactSheet).filter(FactSheet.topic_id == topic_id).delete()
         s.query(Draft).filter(Draft.topic_id == topic_id).delete()
@@ -168,7 +180,7 @@ def run_synthesis(topic_id: int) -> dict:
                         input_tokens=facts.input_tokens, output_tokens=facts.output_tokens))
         s.add(Draft(
             topic_id=topic_id, article=draft.payload["article"],
-            script=draft.payload["script"], meta=draft.payload["metadata"],
+            script=draft.payload["script"], meta=draft_meta,
             model=draft.model, input_tokens=draft.input_tokens,
             output_tokens=draft.output_tokens, validation_notes=notes,
         ))
@@ -199,12 +211,15 @@ def run_assets(topic_id: int) -> dict:
         check = check_freshness(topic.created_at, detect_config()["freshness"]["max_age_hours"])
         article, script, meta = dict(draft.article), dict(draft.script), dict(draft.meta)
         entity = topic.primary_entity
+        # the story's own sources, best first: where a credited photo may come from (COVER_IMAGE_MODE=source)
+        sources = [{"url": a.url, "domain": a.domain} for a in s.scalars(
+            select(ScrapedArticle).where(ScrapedArticle.topic_id == topic_id).order_by(ScrapedArticle.source_index))]
     if not check.fresh:
         _fail(topic_id, check.reason)
         return {"topic_id": topic_id, "ok": False, "error": check.reason}
 
     try:
-        result = produce_assets(topic_id, article, script, meta, entity=entity)
+        result = produce_assets(topic_id, article, script, meta, entity=entity, sources=sources)
     except Exception as exc:  # noqa: BLE001
         _fail(topic_id, f"asset production error: {exc}")
         return {"topic_id": topic_id, "ok": False, "error": str(exc)}

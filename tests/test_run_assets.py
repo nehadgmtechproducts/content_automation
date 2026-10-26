@@ -24,7 +24,7 @@ def test_run_assets_succeeds_for_a_fresh_topic(monkeypatch):
         s.add(Draft(topic_id=tid, article={"title": "A"}, script={"beats": []}, meta={}))
 
     seen = {}
-    def fake_produce(topic_id, article, script, meta, entity):
+    def fake_produce(topic_id, article, script, meta, entity, sources=None):
         seen.update(article=article, script=script, meta=meta, entity=entity)
         p = Path("/tmp/x")
         return SimpleNamespace(directory=p, hero_image=p, voiceover=p, subtitles=p, video=p,

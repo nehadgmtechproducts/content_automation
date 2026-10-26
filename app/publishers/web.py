@@ -43,7 +43,10 @@ class MediaFacts:
     video_width: int = 0
     video_height: int = 0
     video_seconds: float = 0.0
-    cover_credit: str = ""      # e.g. "Illustration generated with AI"; empty = no credit line
+    cover_credit: str = ""      # "Illustration generated with AI" or "Image: The Guardian"; empty = no credit line
+    cover_credit_url: str = ""  # for a source photo: the page it came from (the credit links there)
+    cover_ai: bool = False      # the cover is an AI illustration (the website then shows its AI badge)
+    cover_file_photo: bool = False   # a Wikimedia Commons file photo of the subject, not a photo of the event
 
 
 @dataclass
@@ -175,9 +178,13 @@ def build_web_article(*, topic_id: int, entity: str, article: dict, meta: dict,
         "heroImage": {
             "src": paths.cover,
             "width": media.cover_width, "height": media.cover_height,
-            "alt": (f"AI-generated illustration for the story: {article['title']}"
-                    if media.cover_credit else f"Abstract cover image for the story: {article['title']}"),
+            "alt": (f"AI-generated illustration for the story: {article['title']}" if media.cover_ai
+                    else f"File photo for the story: {article['title']}" if media.cover_file_photo
+                    else f"Photo for the story: {article['title']}" if media.cover_credit
+                    else f"Abstract cover image for the story: {article['title']}"),
             **({"credit": media.cover_credit} if media.cover_credit else {}),
+            **({"creditUrl": media.cover_credit_url} if media.cover_credit_url else {}),
+            **({"aiGenerated": True} if media.cover_ai else {}),
         },
         # Titled card: used only for link previews (Open Graph / Twitter).
         "socialImage": {
@@ -273,10 +280,20 @@ def export_topic(topic_id: int, web_dir: Path, media_root: Path,
     names = {stem: publish_asset(path, dest, stem) for stem, path in
              {"cover": cover_src, **required}.items()}
 
-    from app.assets.pipeline import COVER_SOURCE_FILE
+    from app.assets.pipeline import COVER_CREDIT_FILE, COVER_SOURCE_FILE
     from app.providers.image_nvidia import CREDIT
     source_file = src / COVER_SOURCE_FILE
-    ai_cover = source_file.exists() and source_file.read_text(encoding="utf-8").strip() == "ai"
+    cover_kind = source_file.read_text(encoding="utf-8").strip() if source_file.exists() else "gradient"
+    cover_credit, cover_credit_url = "", ""
+    if cover_kind == "ai":
+        cover_credit = CREDIT
+    elif cover_kind in ("source", "commons"):
+        try:
+            info = json.loads((src / COVER_CREDIT_FILE).read_text(encoding="utf-8"))
+            cover_credit, cover_credit_url = info["credit"], info["url"]
+        except (OSError, ValueError, KeyError):
+            # a photo with no known credit must never be published: fall back to the plain cover rather than guess
+            raise ExportError(f"topic {topic_id}: cover is a source photo but {COVER_CREDIT_FILE} is missing or unreadable")
 
     cw, ch = _image_size(dest / names["cover"])
     sw, sh = _image_size(dest / names["social"])
@@ -285,7 +302,9 @@ def export_topic(topic_id: int, web_dir: Path, media_root: Path,
     doc = build_web_article(
         topic_id=topic_id, entity=entity, article=article, meta=meta, sources=sources,
         published_at=published_at,
-        media=MediaFacts(cw, ch, sw, sh, vw, vh, secs, cover_credit=CREDIT if ai_cover else ""),
+        media=MediaFacts(cw, ch, sw, sh, vw, vh, secs, cover_credit=cover_credit,
+                         cover_credit_url=cover_credit_url, cover_ai=cover_kind == "ai",
+                         cover_file_photo=cover_kind == "commons"),
         paths=MediaPaths(cover=f"{base}/{names['cover']}", social=f"{base}/{names['social']}",
                          poster=f"{base}/{names['poster']}" if has_video else "",
                          video=f"{base}/{names['video']}" if has_video else ""),

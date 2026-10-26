@@ -20,6 +20,8 @@ x-app-env: &app-env
   FAL_LLM_MODEL: ${FAL_LLM_MODEL:-openai/gpt-6.1-sol}
   NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
   NVIDIA_MODEL: ${NVIDIA_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}
+  COMMONS_ALLOW_SHAREALIKE: ${COMMONS_ALLOW_SHAREALIKE:-false}
+  COVER_IMAGE_MODE: ${COVER_IMAGE_MODE:-source}   # source | ai | gradient (see .env.example)
   AI_IMAGES: ${AI_IMAGES:-true}                # AI cover illustration; gradient fallback on failure
   NVIDIA_IMAGE_MODEL: ${NVIDIA_IMAGE_MODEL:-black-forest-labs/flux.2-klein-4b}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

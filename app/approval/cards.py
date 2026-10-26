@@ -83,10 +83,11 @@ def build_article_messages(article: dict, sources: list[dict] | None = None,
     return messages
 
 
-def build_review_caption(article: dict) -> str:
+def build_review_caption(article: dict, sensitive: bool = False) -> str:
     """Caption on the hero photo in articles-only mode — the message the buttons attach to."""
     title = article.get("title", "Untitled")
-    return trim(f"\U0001f4f0 Article draft \u2014 read above, then decide\n{title}", MAX_CAPTION_CHARS)
+    flag = "⚠️ SENSITIVE: check nobody is identifiable\n" if sensitive else ""
+    return trim(f"{flag}\U0001f4f0 Article draft \u2014 read above, then decide\n{title}", MAX_CAPTION_CHARS)
 
 
 def build_metadata_text(metadata: dict, keyword_limit: int = 6) -> str:
@@ -106,12 +107,34 @@ def build_metadata_text(metadata: dict, keyword_limit: int = 6) -> str:
     return trim("\n".join(lines), MAX_MESSAGE_CHARS)
 
 
-def build_keyboard(topic_id: int) -> dict:
+def build_sensitive_warning(sensitive: dict) -> str:
+    """The first message of a card about a story that involves a sexual offence or a child in a crime
+    (see app/identity_guard.py). Lists every person and place the story names, so the reviewer can see
+    exactly what could identify someone, instead of having to spot it in a wall of text."""
+    names = sensitive.get("names") or []
+    lines = [
+        "⚠️ SENSITIVE STORY: read before approving",
+        "Why: " + "; ".join(sensitive.get("reasons") or ["flagged by the identity check"]) + ".",
+        "",
+        "The law forbids identifying a child, or a survivor of a sexual offence (BNS sections 72-73, POCSO section 23). "
+        "Below is every person and place this story names. If ANY of them could identify a child or a survivor "
+        "(a name, a school, a neighbourhood, a relative), press Discard.",
+        "",
+        "Named: " + ("; ".join(names) if names else "(none found: still read the story)"),
+        "",
+        "The Approve button on this story reads \"nobody identifiable\". Press it only if that is true.",
+    ]
+    return trim("\n".join(lines), MAX_MESSAGE_CHARS)
+
+
+def build_keyboard(topic_id: int, sensitive: bool = False) -> dict:
     """Inline keyboard attached to the video message. callback_data stays under
-    Telegram's 64-byte limit by design — 'approve:' + a topic id is always tiny."""
+    Telegram's 64-byte limit by design — 'approve:' + a topic id is always tiny.
+    On a sensitive story the Approve button says what pressing it means."""
+    approve = "✅ Approve: nobody identifiable" if sensitive else "✅ Approve & Deploy"
     return {
         "inline_keyboard": [[
-            {"text": "✅ Approve & Deploy", "callback_data": f"approve:{topic_id}"},
+            {"text": approve, "callback_data": f"approve:{topic_id}"},
             {"text": "❌ Discard", "callback_data": f"discard:{topic_id}"},
         ]]
     }

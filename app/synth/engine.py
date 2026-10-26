@@ -38,7 +38,14 @@ Record every supporting source index.
 articles. If the sources do not say it, it does not exist.
 - Copy figures exactly as reported, with their units and their qualifiers ("about", \
 "more than").
-- Prefer specific attributions ("according to the filing") over vague ones ("reportedly")."""
+- Prefer specific attributions ("according to the filing") over vague ones ("reportedly").
+- IDENTITY PROTECTION (overrides the rule above about copying names): when a child (under 18) \
+is involved in a crime or a court case, or a person is the victim or survivor of a sexual \
+offence, NEVER write their name, their relatives' names, their school, their address or \
+neighbourhood, their workplace or any other detail that could identify them into any field of \
+the fact sheet, even though the articles contain it. Describe them only generically ("a \
+14-year-old girl", "the complainant", "the victim's mother", "a school in the city"). The \
+adult accused may be named when the sources name them."""
 
 DRAFT_SYSTEM = """You are a senior news editor writing for a general audience that is \
 intelligent but time-poor. You write from a supplied fact sheet and nothing else.
@@ -77,6 +84,18 @@ authors. Do not confuse correlation with causation. Give no medical advice, dosa
 recommendations to readers. No graphic detail; case, death and hospitalisation figures must \
 carry the body that reported them.
 - Technology: performance and benchmark claims belong to the company that made them.
+
+Crime, courts and victims (in ANY category, in addition to the rules above):
+- Describe a person as accused or charged, never as guilty, unless the sources say a court has \
+convicted them, and attribute every allegation to where it comes from (police, FIR, charge \
+sheet, court filing, named official). A court report must be a fair, accurate account of what \
+was said or ordered.
+- Never name, describe or otherwise identify a child (under 18) involved in a crime or a \
+court case, or a victim or survivor of a sexual offence: no name, age-with-place, school, \
+address, photograph description or family detail. Leave it out even if a source publishes it. \
+Write "a 14-year-old girl", never her name, her school, her neighbourhood or her relatives' \
+names. This applies to EVERY field you write: title, dek, meta description, headings, body, \
+takeaways, keywords, hashtags, thumbnail text and the video script.
 
 Hard rules:
 - Every factual claim in the article must trace to a consensus fact in the supplied sheet. \

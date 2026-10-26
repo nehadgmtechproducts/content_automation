@@ -278,6 +278,42 @@ the exporter maps legacy labels onto the list or refuses to publish.
   violence, patients, doctors, injections or bodies is replaced with a symbolic people-free one
   (a gavel for politics; a stethoscope or lab bench for healthcare), and the headline is
   withheld from the footage prompt. The same shot description feeds the AI cover picture.
+- **Identity protection (`app/identity_guard.py`).** The website's `/legal-compliance` page promises that children and
+  survivors of sexual offences are not identified, and that accused people are not called guilty. Both prompts carry the rule
+  (`FACTS_SYSTEM`, so the identity never enters the fact sheet, and `DRAFT_SYSTEM`; pinned by `tests/test_editorial_rules.py`).
+  **A prompt is not enough**: in testing the model still wrote a child victim's school and neighbourhood. So code adds a
+  backstop: a story about a sexual offence, or a child harmed in a crime, is detected without any model, flagged in
+  `Draft.meta["sensitive"]` with every person and place it names, and its Telegram card starts with a warning listing those
+  names and has an Approve button that reads "nobody identifiable". It never blocks or edits anything itself: it makes sure
+  the human is looking at the right thing. It is deliberately over-inclusive (a war report mentioning children killed is
+  flagged too), and if it crashes the story is flagged, never waved through.
+- **Source photos (`COVER_IMAGE_MODE=source`, the default).** A story's picture is first sought among its own sources
+  (`app/providers/source_photo.py`): every news page names its lead photo in its metadata (`og:image`). To limit copyright
+  risk the finder **never uses** agency or stock pictures (Getty, AP, AFP, Reuters, Shutterstock, Alamy, EPA, PA...): it
+  checks the file name, the structured-data credit and the page's first captions, and one flagged picture or caption skips
+  the **whole page** (pages offer several renditions of one agency photo and only some names say so). It also skips logos,
+  placeholders, outlet-branded frames, tiny images, banners and flat colours. The photo is only cropped to 16:9 and resized,
+  is credited ("Image: The Guardian", linking to the page it came from) on the website and painted onto the share image,
+  and is **never used on a story flagged sensitive** (a sexual offence or a child; see Identity protection). With no safe
+  photo it tries a Commons file photo (below), then the AI illustration, then the gradient. `COVER_IMAGE_MODE=ai` or `gradient` turns it off;
+  re-export with the same scripts as for the AI covers. **In testing on 7 real stories only 1 had a safe photo**: mainstream
+  news photography is overwhelmingly agency material. `tests/test_source_photo.py` pins every rule above.
+- **Wikimedia Commons file photos (second choice).** When no safe source photo exists, `app/providers/commons_photo.py` looks for a
+  free-licence photo OF the story's subject, not of the event, and always captions it "File photo. Photo: <author> / Wikimedia Commons
+  (<licence>), cropped", linking to its Commons page. The risk here is a WRONG picture, not copyright: a plain image search for
+  "Michael Gray" returns a footballer and a singer, "BBC" returns logos and a sports car. So it never searches images by name. It reads
+  the people, organisations and places the story's **headline** names (a quoted expert is never the subject; a lone surname only
+  expands to a full name when it can mean exactly one person; countries and continents are too generic and are skipped), resolves each
+  to the right Wikipedia article by how well its summary matches the story's own words (a disambiguation page, or several same-named
+  articles with no clue which, gives nothing), and takes that article's lead image, which Wikipedia editors chose to depict the
+  subject. It is used only if it is on Commons with CC0, public domain or CC BY (CC BY-SA is off unless `COMMONS_ALLOW_SHAREALIKE=true`,
+  because the share card adapts the photo), an author is named when the licence demands attribution, and it is a real photograph (not a
+  logo, flag, map or diagram), large enough, and not a sexual-offence/child story. A portrait is shown whole over a blurred backdrop
+  rather than cropped through the face. On 7 real stories it found 4 correct photos and refused 3; every miss was a correct refusal.
+  `tests/test_commons_photo.py` pins the rules, including the wrong-person cases.
+- **AI label on the share image.** When the titled card sits on an AI picture (`hero.jpg`, used for link previews and the
+  Telegram card), `ImageRequest.label` makes the card painter draw a dark "AI-GENERATED ILLUSTRATION" pill in the top-right
+  corner, so the label travels with the file. The website adds its own HTML badge on every AI cover.
 - **Adding a category** means changing `app/categories.py` (name, slug, what it covers, synonyms,
   visual-safety flag), the `CategoryName` literal beside it (a test checks they match), the
   editorial rule in `app/synth/engine.py`, a fallback scene in `app/providers/image_nvidia.py`,

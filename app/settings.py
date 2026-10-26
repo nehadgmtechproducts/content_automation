@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     nvidia_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     nvidia_thinking: bool = False
     # AI-generated cover illustration (FLUX on NVIDIA's API); falls back to the gradient on failure.
+    # Where a story's picture comes from. "source": a photo from one of the story's own sources (credited, linked,
+    # agency/stock pictures screened out, never on a sexual-offence/child story), falling back to the AI
+    # illustration, then the gradient. "ai": AI illustration only. "gradient": neither.
+    cover_image_mode: str = "source"
+    # Commons photos under a share-alike licence (CC BY-SA) are off: our share card is an adaptation of the photo, and
+    # share-alike would then bind it. Turn on only if your lawyer is happy with that.
+    commons_allow_sharealike: bool = False
     ai_images: bool = True
     nvidia_image_model: str = "black-forest-labs/flux.2-klein-4b"
 

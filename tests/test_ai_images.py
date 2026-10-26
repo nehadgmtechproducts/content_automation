@@ -166,3 +166,42 @@ def test_generic_prompts_exist_for_every_category_and_name_nothing_from_the_stor
     for name in NAMES:
         p = nv.generic_prompt(name)
         assert name in nv._GENERIC_SCENES and "no logos" in p
+
+
+# ---------- the label painted onto the picture ----------
+
+def _render(tmp_path, label, name):
+    bg = tmp_path / "bg.jpg"; Image.new("RGB", (1600, 900), (230, 230, 230)).save(bg)          # a pale picture: worst case for a label
+    out = PillowEditorialCard().generate(
+        ImageRequest(headline="A headline", entity="Ent", background=str(bg), label=label), tmp_path / name)
+    return Image.open(out).convert("RGB")
+
+
+def test_the_label_is_painted_in_the_top_right_corner_and_only_when_asked(tmp_path):
+    with_label, without = _render(tmp_path, "AI-generated illustration", "a.jpg"), _render(tmp_path, "", "b.jpg")
+    w, h = with_label.size
+    corner = (int(w * 0.62), 0, w, int(h * 0.14))
+    assert with_label.crop(corner).tobytes() != without.crop(corner).tobytes()               # something was drawn there
+    dark = [p for p in with_label.crop(corner).getdata() if sum(p) < 60]
+    white = [p for p in with_label.crop(corner).getdata() if sum(p) > 740]
+    assert len(dark) > 500 and len(white) > 60                                                # a dark pill with white text
+    rest = (0, int(h * 0.20), w, h)                                                           # nothing else changed
+    assert with_label.crop(rest).tobytes() == without.crop(rest).tobytes()
+
+
+def test_the_pipeline_labels_the_card_when_it_sits_on_an_ai_picture(monkeypatch, tmp_path):
+    seen = []
+    class Spy(FakeImage):
+        def generate(self, req, out_path):
+            seen.append((req.background, req.label)); return super().generate(req, out_path)
+    providers = SimpleNamespace(image=Spy(), tts=NoTTS(), broll=None, used={})
+    monkeypatch.setattr(assets, "load_providers", lambda: providers)
+    monkeypatch.setattr(assets, "get_settings", lambda: SimpleNamespace(media_path=tmp_path, generate_video=False))
+    install(monkeypatch, ok)
+    assets.produce_assets(6, {"title": "T", "dek": "d"}, SCRIPT, {"category": "Technology"}, entity="Apple")
+    assert seen[0][1] == "AI-generated illustration" and seen[0][0].endswith("art.jpg")
+
+    seen.clear()
+    install(monkeypatch, lambda r: httpx.Response(500))                                       # art fails -> gradient card
+    assets.produce_assets(7, {"title": "T", "dek": "d"}, SCRIPT, {"category": "Technology"}, entity="Apple")
+    assert seen[0] == ("", "")                                                                # no picture to label, so no label

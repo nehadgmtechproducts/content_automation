@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from app.approval.cards import (
     build_article_messages, build_keyboard, build_metadata_text, build_photo_caption,
-    build_review_caption, build_video_caption, decide, parse_callback_data,
+    build_review_caption, build_sensitive_warning, build_video_caption, decide, parse_callback_data,
 )
 from app.approval.telegram_client import TelegramClient, TelegramError
 from app.db import session_scope
@@ -75,12 +75,16 @@ def push_for_approval(topic_id: int, client: TelegramClient | None = None) -> di
     chat_id = settings.telegram_chat_id
     client = client or _client()
 
+    sensitive = metadata.get("sensitive")           # set by app/identity_guard.py at synthesis time
+    keyboard = build_keyboard(topic_id, sensitive=bool(sensitive))
     try:
+        if sensitive:
+            client.send_message(chat_id, build_sensitive_warning(sensitive))   # first, so it is read first
         if video_path:
             photo_res = client.send_photo(chat_id, hero_path, build_photo_caption(article))
             video_res = client.send_video(
                 chat_id, video_path, build_video_caption(article, entity),
-                reply_markup=build_keyboard(topic_id),
+                reply_markup=keyboard,
             )
             meta_res = client.send_message(chat_id, build_metadata_text(metadata))
         else:
@@ -88,8 +92,8 @@ def push_for_approval(topic_id: int, client: TelegramClient | None = None) -> di
                 client.send_message(chat_id, text)
             meta_res = client.send_message(chat_id, build_metadata_text(metadata))
             video_res = client.send_photo(
-                chat_id, hero_path, build_review_caption(article),
-                reply_markup=build_keyboard(topic_id),
+                chat_id, hero_path, build_review_caption(article, sensitive=bool(sensitive)),
+                reply_markup=keyboard,
             )
             photo_res = {}   # the buttons' photo is the card's main message
     except TelegramError as exc:

@@ -78,7 +78,7 @@ def test_articles_only_makes_images_and_nothing_else(monkeypatch, media):
     assert result.hero_vertical is None and result.duration == 0.0
     assert result.hero_image.name == "hero.jpg" and result.cover_image.name == "cover.jpg"
     package = json.loads((media / "7" / "package.json").read_text())
-    assert package["assets"] == {"hero": "hero.jpg", "cover": "cover.jpg", "art": None}
+    assert package["assets"] == {"hero": "hero.jpg", "cover": "cover.jpg", "art": None, "art_kind": None}
     assert "video_info" not in package
 
 
@@ -243,3 +243,50 @@ def test_export_credits_an_ai_cover_and_not_a_gradient_one(database, tmp_path):
     assert ai["credit"] == "Illustration generated with AI" and ai["alt"].startswith("AI-generated illustration")
     plain = exported("gradient")
     assert "credit" not in plain and plain["alt"].startswith("Abstract cover")
+
+
+def _export_with(tmp_path, kind, credit_file=None):
+    tid = add_topic(TopicStatus.approved)
+    media = tmp_path / "media" / str(tid); media.mkdir(parents=True)
+    Image.new("RGB", (1200, 675), (10, 20, 30)).save(media / "hero.jpg")
+    (media / "cover.source").write_text(kind)
+    if credit_file is not None:
+        (media / "cover.credit.json").write_text(json.dumps(credit_file))
+    (tmp_path / "web" / "content").mkdir(parents=True, exist_ok=True)
+    web.export_topic(tid, tmp_path / "web", tmp_path / "media")
+    return json.loads((tmp_path / "web/content/articles/apple-disk.json").read_text())["heroImage"]
+
+
+def test_a_source_photo_is_exported_with_its_credit_and_a_link_and_is_not_marked_ai(database, tmp_path):
+    hero = _export_with(tmp_path, "source", {"credit": "Image: The Example", "outlet": "The Example", "url": "https://example.test/story"})
+    assert hero["credit"] == "Image: The Example" and hero["creditUrl"] == "https://example.test/story"
+    assert hero["alt"].startswith("Photo for the story") and "aiGenerated" not in hero
+
+
+def test_an_ai_cover_is_exported_flagged_as_ai(database, tmp_path):
+    hero = _export_with(tmp_path, "ai")
+    assert hero["aiGenerated"] is True and hero["credit"] == "Illustration generated with AI" and "creditUrl" not in hero
+
+
+def test_a_gradient_cover_has_no_credit_and_no_flag(database, tmp_path):
+    hero = _export_with(tmp_path, "gradient")
+    assert "credit" not in hero and "aiGenerated" not in hero and hero["alt"].startswith("Abstract cover")
+
+
+def test_a_source_photo_without_its_credit_is_never_published(database, tmp_path):
+    """A photograph we cannot credit must not go out: the export refuses instead of guessing."""
+    with pytest.raises(web.ExportError, match="cover.credit.json"):
+        _export_with(tmp_path, "source", credit_file=None)
+
+
+def test_a_commons_file_photo_is_exported_with_credit_link_and_a_file_photo_alt(database, tmp_path):
+    credit = "File photo. Photo: Steve Jurvetson / Wikimedia Commons (CC BY 2.0), cropped"
+    hero = _export_with(tmp_path, "commons", {"credit": credit, "outlet": "Wikimedia Commons",
+                                              "url": "https://commons.wikimedia.org/wiki/File:Elon_Musk_2015.jpg", "licence": "CC BY 2.0"})
+    assert hero["credit"] == credit and hero["creditUrl"].startswith("https://commons.wikimedia.org/wiki/File:")
+    assert hero["alt"].startswith("File photo for the story") and "aiGenerated" not in hero
+
+
+def test_a_commons_photo_without_its_credit_is_never_published(database, tmp_path):
+    with pytest.raises(web.ExportError, match="cover.credit.json"):
+        _export_with(tmp_path, "commons", credit_file=None)

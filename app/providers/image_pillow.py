@@ -141,9 +141,26 @@ class PillowEditorialCard(ImageProvider):
             draw.text((margin + pad, h - margin - box_h + pad), label,
                       font=tag_font, fill=(12, 12, 16))
 
+        if req.label:
+            draw_label(draw, req.label, w, h)
+
         out_path.parent.mkdir(parents=True, exist_ok=True)
         img.save(out_path, quality=92)
         return out_path
+
+
+def draw_label(draw: ImageDraw.ImageDraw, text: str, w: int, h: int) -> None:
+    """A small dark pill with white capitals in the top-right corner: the visible mark on a picture that is
+    an AI-generated illustration. It is part of the image file, so it travels with the picture into link
+    previews, search results and chat apps, away from the web page and its HTML badge."""
+    font = ImageFont.truetype(bold_font(), max(13, int(h * 0.030)))
+    label = text.upper()
+    pad_x, pad_y, margin = int(h * 0.022), int(h * 0.014), int(h * 0.035)
+    tw = draw.textlength(label, font=font)
+    box_w, box_h = tw + 2 * pad_x, font.size + 2 * pad_y
+    x1, y0 = w - margin, margin
+    draw.rounded_rectangle([x1 - box_w, y0, x1, y0 + box_h], radius=int(box_h * 0.25), fill=(8, 8, 12))
+    draw.text((x1 - box_w + pad_x, y0 + pad_y - 1), label, font=font, fill=(255, 255, 255))
 
 
 COVER_WIDTH, COVER_HEIGHT = 1600, 900
