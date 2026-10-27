@@ -356,3 +356,12 @@ Start these now — they're the long pole and nothing in this milestone unblocks
 - **Instagram Reels** requires a Business account plus Meta app review.
 - **YouTube** Data API v3 default quota allows roughly 6 uploads/day.
 - **X** free tier caps posting hard; Basic is ~$200/month.
+
+## Secrets
+
+- Real values live **only** in the git-ignored `.env` (file mode `600`); `.env.example` has names and no values.
+- `docker-compose.yml` gives each service only what it needs (tested in `tests/test_compose_security.py`): the worker the AI and Telegram
+  keys, the approvals listener only Telegram, the scheduler and the shell none. Database and Redis ports are bound to `127.0.0.1`.
+- `scripts/check-secrets.sh` refuses to commit an API key, a Telegram token, a private key or a real `.env`. Enable it once per clone:
+  `git config core.hooksPath .githooks`. `scripts/check-secrets.sh --all` scans everything tracked. Tests: `tests/test_secret_scanner.py`.
+- A key that was ever pasted into a chat, an issue or a screenshot is compromised: rotate it, do not just delete the message.

@@ -16,24 +16,33 @@ x-app-env: &app-env
   HF_HOME: /srv/models/hf               # whisper + embedding models, persisted in ./models
   WEB_PROJECT_DIR: /srv/web             # where approved stories are published (see volumes)
   SYNTHESIS_PROVIDER: ${SYNTHESIS_PROVIDER:-fal}
-  FAL_KEY: ${FAL_KEY:-}
   FAL_LLM_MODEL: ${FAL_LLM_MODEL:-openai/gpt-6.1-sol}
-  NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
   NVIDIA_MODEL: ${NVIDIA_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}
   COMMONS_ALLOW_SHAREALIKE: ${COMMONS_ALLOW_SHAREALIKE:-false}
   COVER_IMAGE_MODE: ${COVER_IMAGE_MODE:-source}   # source | ai | gradient (see .env.example)
   AI_IMAGES: ${AI_IMAGES:-true}                # AI cover illustration; gradient fallback on failure
   NVIDIA_IMAGE_MODEL: ${NVIDIA_IMAGE_MODEL:-black-forest-labs/flux.2-klein-4b}
+  MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-14}
+  GENERATE_VIDEO: ${GENERATE_VIDEO:-false}   # false = articles + images only (no voice/b-roll/MP4)
+
+# SECRETS, kept out of x-app-env on purpose: each service gets only the groups it needs, so a leak in one container
+# (a log line, a crash dump, `docker inspect`) cannot hand over keys that container never used.
+#   worker  : ai + telegram   (writes stories, sends the approval card)
+#   approvals: telegram only  (listens for the buttons, publishes; never calls an AI)
+#   beat, render: none
+x-ai-secrets: &ai-secrets
+  FAL_KEY: ${FAL_KEY:-}
+  NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
   PEXELS_API_KEY: ${PEXELS_API_KEY:-}
   ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
   REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+
+x-telegram-secrets: &telegram-secrets
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
   TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-  MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-14}
-  GENERATE_VIDEO: ${GENERATE_VIDEO:-false}   # false = articles + images only (no voice/b-roll/MP4)
 
 x-app: &app
   build: { context: ., dockerfile: docker/render.Dockerfile }
@@ -55,7 +64,9 @@ services:
       POSTGRES_USER: engine
       POSTGRES_PASSWORD: engine
       POSTGRES_DB: content_engine
-    ports: ["5432:5432"]
+    # 127.0.0.1 only: reachable from this machine (your shell, alembic), never from the network. Published on all
+    # interfaces it would be open to the internet on a server (Docker bypasses ufw), with a default password.
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["./pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U engine -d content_engine"]
@@ -69,7 +80,7 @@ services:
     image: redis:7-alpine
     platform: ${DOCKER_PLATFORM:-linux/arm64}
     restart: unless-stopped
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]      # same reason: Redis has no password
     command: ["redis-server", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -79,8 +90,10 @@ services:
 
   api:
     <<: *app
+    environment:
+      <<: [*app-env, *ai-secrets, *telegram-secrets]
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]
     volumes: *app-volumes
     profiles: ["extras"]
     depends_on:
@@ -90,6 +103,8 @@ services:
   # Concurrency stays at 1: a render plus a Whisper model is most of the free memory.
   worker:
     <<: *app
+    environment:
+      <<: [*app-env, *ai-secrets, *telegram-secrets]
     volumes: *app-volumes
     depends_on:
       postgres: { condition: service_healthy }
@@ -99,6 +114,8 @@ services:
 
   beat:
     <<: *app
+    environment:
+      <<: [*app-env]
     command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=info",
               "--schedule=/tmp/celerybeat-schedule"]
     depends_on:
@@ -107,6 +124,8 @@ services:
   # One-off render shell:  docker compose run --rm render ffmpeg -filters | grep ass
   render:
     <<: *app
+    environment:
+      <<: [*app-env]
     volumes: *app-volumes
     profiles: ["tools"]
     restart: "no"
@@ -119,6 +138,8 @@ services:
   # ONLY ONE poller may run per bot token — stop any `approvals-poll` started by hand first.
   approvals:
     <<: *app
+    environment:
+      <<: [*app-env, *telegram-secrets]
     command: ["python", "-m", "app.cli", "approvals-poll"]
     volumes:
       - ./media:/srv/media
@@ -129,7 +150,7 @@ services:
   n8n:
     image: n8nio/n8n:latest
     platform: ${DOCKER_PLATFORM:-linux/arm64}
-    ports: ["5678:5678"]
+    ports: ["127.0.0.1:5678:5678"]
     environment:
       N8N_SECURE_COOKIE: "false"
       GENERIC_TIMEZONE: UTC
